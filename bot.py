@@ -28,9 +28,10 @@ VOICE_CHANNEL_IDS = [
     1483414016314314888
 ]
 
-# ---------------------------
+
+# ======================================================
 # 🎯 유저 가져오기
-# ---------------------------
+# ======================================================
 def get_same_voice_members(interaction):
     voice = interaction.user.voice
     if not voice or not voice.channel:
@@ -39,17 +40,17 @@ def get_same_voice_members(interaction):
     return [m for m in voice.channel.members if not m.bot], voice.channel
 
 
-# ---------------------------
+# ======================================================
 # 🎯 팀 생성
-# ---------------------------
+# ======================================================
 def create_teams(members, size):
     random.shuffle(members)
-    return [members[i:i+size] for i in range(0, len(members), size)]
+    return [members[i:i + size] for i in range(0, len(members), size)]
 
 
-# ---------------------------
+# ======================================================
 # ⚡ 초고속 이동 (안정 버전)
-# ---------------------------
+# ======================================================
 async def move_members_fast(members, target):
 
     async def move(m):
@@ -63,7 +64,7 @@ async def move_members_fast(members, target):
 
 
 # ======================================================
-# 🎮 팀 이동 버튼
+# 🎮 팀 이동 UI
 # ======================================================
 class MoveTeamsView(discord.ui.View):
     def __init__(self, teams):
@@ -78,6 +79,7 @@ class MoveTeamsView(discord.ui.View):
         guild = interaction.guild
 
         for i, team in enumerate(self.teams):
+
             if i >= len(VOICE_CHANNEL_IDS):
                 break
 
@@ -90,12 +92,13 @@ class MoveTeamsView(discord.ui.View):
 
 
 # ======================================================
-# 👤 개별소환 (완전 안정)
+# 👤 개별 소환 (완전 안정)
 # ======================================================
 class SummonUserView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=120)
 
+        # 🔥 ID만 저장 (핵심)
         self.selected_users = set()
 
         self.select = discord.ui.UserSelect(
@@ -104,9 +107,9 @@ class SummonUserView(discord.ui.View):
             max_values=25
         )
 
-        # ✅ 핵심: 값만 저장
         async def select_callback(interaction: discord.Interaction):
-            self.selected_users = set(self.select.values)
+            # 🔥 객체 저장 금지 → ID만 저장
+            self.selected_users = {u.id for u in self.select.values}
             await interaction.response.defer()
 
         self.select.callback = select_callback
@@ -123,35 +126,42 @@ class SummonUserView(discord.ui.View):
             await interaction.response.send_message("❌ 유저 선택 필요", ephemeral=True)
             return
 
+        await interaction.response.defer()
+
         target = interaction.user.voice.channel
 
-        members = [u for u in self.selected_users if u.voice]
+        members = []
 
-        await interaction.response.defer()
+        for uid in self.selected_users:
+            m = interaction.guild.get_member(uid)
+            if m and m.voice:
+                members.append(m)
+
         await move_members_fast(members, target)
 
         await interaction.followup.send(f"⚡ {len(members)}명 소환 완료")
 
 
 # ======================================================
-# 📢 채널소환 (🔥 완전 안정 핵심 버전)
+# 📢 채널 소환 (🔥 핵심 안정 버전)
 # ======================================================
 class SummonChannelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=300)
 
+        # 🔥 채널 ID만 저장 (핵심)
         self.selected_channels = set()
 
         self.select = discord.ui.ChannelSelect(
-            placeholder="음성채널 선택 (여러개 가능)",
+            placeholder="음성채널 선택",
             min_values=1,
             max_values=10,
             channel_types=[discord.ChannelType.voice]
         )
 
-        # ✅ 핵심: select callback 직접 연결
         async def select_callback(interaction: discord.Interaction):
-            self.selected_channels = set(self.select.values)
+            # 🔥 객체 저장 금지 → ID만 저장
+            self.selected_channels = {ch.id for ch in self.select.values}
             await interaction.response.defer()
 
         self.select.callback = select_callback
@@ -174,8 +184,9 @@ class SummonChannelView(discord.ui.View):
 
         members = []
 
-        # 🔥 ChannelSelect는 AppCommandChannel이므로 int 변환 금지
-        for ch in self.selected_channels:
+        for ch_id in self.selected_channels:
+            ch = interaction.guild.get_channel(ch_id)
+
             if isinstance(ch, discord.VoiceChannel):
                 members.extend([m for m in ch.members if not m.bot])
 
@@ -235,7 +246,7 @@ async def summon_channel(interaction: discord.Interaction):
 
 
 # ======================================================
-# 🚀 시작
+# 🚀 봇 시작
 # ======================================================
 @bot.event
 async def on_ready():

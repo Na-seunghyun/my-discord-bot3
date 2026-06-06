@@ -136,10 +136,12 @@ class SummonChannelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=120)
 
+        # 🔥 음성채널만 표시
         self.channel_select = discord.ui.ChannelSelect(
             placeholder="소환할 음성채널 선택",
             min_values=1,
-            max_values=10
+            max_values=10,
+            channel_types=[discord.ChannelType.voice]
         )
 
         self.add_item(self.channel_select)
@@ -150,6 +152,9 @@ class SummonChannelView(discord.ui.View):
         if not interaction.user.voice:
             await interaction.response.send_message("❌ 음성채널 없음")
             return
+
+        # 🔥 즉시 ACK (상호작용 실패 방지 핵심)
+        await interaction.response.defer()
 
         target = interaction.user.voice.channel
 
@@ -162,8 +167,7 @@ class SummonChannelView(discord.ui.View):
 
         await move_members_fast(members, target)
 
-        await interaction.response.send_message(f"⚡ {len(members)}명 즉시 소환 완료")
-
+        await interaction.followup.send(f"⚡ {len(members)}명 즉시 소환 완료")
 
 # ---------------------------
 # 🤖 팀짜기

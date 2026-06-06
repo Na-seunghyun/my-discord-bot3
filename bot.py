@@ -136,7 +136,8 @@ class SummonChannelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=120)
 
-        # 🔥 음성채널만 표시
+        self.selected_channels = []  # 🔥 선택값 저장
+
         self.channel_select = discord.ui.ChannelSelect(
             placeholder="소환할 음성채널 선택",
             min_values=1,
@@ -146,6 +147,17 @@ class SummonChannelView(discord.ui.View):
 
         self.add_item(self.channel_select)
 
+    # 🔥 선택 이벤트 따로 처리 (핵심)
+    @discord.ui.select()
+    async def channel_select_callback(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+
+        self.selected_channels = select.values
+
+        await interaction.response.send_message(
+            f"✅ {len(self.selected_channels)}개 채널 선택됨",
+            ephemeral=True
+        )
+
     @discord.ui.button(label="즉시 전체 소환", style=discord.ButtonStyle.green)
     async def summon(self, interaction: discord.Interaction, button: discord.ui.Button):
 
@@ -153,14 +165,17 @@ class SummonChannelView(discord.ui.View):
             await interaction.response.send_message("❌ 음성채널 없음")
             return
 
-        # 🔥 즉시 ACK (상호작용 실패 방지 핵심)
+        if not self.selected_channels:
+            await interaction.response.send_message("❌ 채널을 먼저 선택하세요")
+            return
+
         await interaction.response.defer()
 
         target = interaction.user.voice.channel
 
         members = []
 
-        for ch in self.channel_select.values:
+        for ch in self.selected_channels:
             for m in ch.members:
                 if not m.bot and m.voice:
                     members.append(m)

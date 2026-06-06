@@ -221,38 +221,48 @@ class SummonUserView(discord.ui.View):
 @bot.tree.command(name="검사", guild=GUILD_OBJ)
 async def check_nicknames(interaction: discord.Interaction):
 
-    if not await check_permission(interaction):
-        return await interaction.response.send_message("❌ 권한 없음", ephemeral=True)
+    # 🚨 1. 권한 체크 (response 쓰지 말고 여기서 끝내기)
+    if not {r.id for r in interaction.user.roles} & ALLOWED_ROLES:
+        channel = interaction.guild.system_channel or interaction.channel
+
+        await channel.send(
+            f"🚨 누군가 월권을 시도하고있습니다. 토끼님 그를 처벌해주세요\n"
+            f"👤 {interaction.user.mention} (`{interaction.user.id}`)"
+        )
+        return
+
+    # ⚡ 2. 무조건 즉시 ACK
+    await interaction.response.defer(ephemeral=True)
 
     pattern = re.compile(r".+\/.+\/\d{2}$")
 
     invalid = []
 
+    # ⚡ 3. 검사
     for m in interaction.guild.members:
         if m.bot:
             continue
 
-        if not m.nick:
-            invalid.append(m)
-            continue
+        nick = m.nick or m.name
 
-        if not pattern.match(m.nick):
+        if not pattern.match(nick):
             invalid.append(m)
 
+    # ⚡ 4. 결과
     if not invalid:
-        return await interaction.response.send_message("✅ 모든 닉네임 정상입니다")
+        return await interaction.followup.send("✅ 모든 닉네임 정상입니다")
 
     msg = "⚠️ 닉네임 오류 사용자:\n\n"
-    for m in invalid:
-        msg += f"• {m.mention} ({m.nick})\n"
+
+    for m in invalid[:30]:
+        msg += f"• {m.mention} ({m.nick or m.name})\n"
 
         try:
-            await m.send("⚠️ 닉네임 형식이 올바르지 않습니다: 닉네임 / 게임아이디 / 년생(2자리)")
+            await m.send("⚠️ 닉네임 형식 오류: 닉네임 / 게임아이디 / 2자리 년생")
         except:
             pass
 
-    await interaction.response.send_message(msg)
-
+    await interaction.followup.send(msg)
 
 # ======================================================
 # 🚀 실행

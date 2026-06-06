@@ -15,6 +15,17 @@ GUILD_OBJ = discord.Object(id=GUILD_ID)
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# ======================================================
+# 🔥 허용 역할 (핵심)
+# ======================================================
+ALLOWED_ROLES = {
+    1317699909536977038,
+    1317699017056063610
+}
+
+# ======================================================
+# 🎯 음성 채널 리스트
+# ======================================================
 VOICE_CHANNEL_IDS = [
     1309433603331198982,
     1309750071918723092,
@@ -27,6 +38,27 @@ VOICE_CHANNEL_IDS = [
     1483413953844482168,
     1483414016314314888
 ]
+
+
+# ======================================================
+# 🚨 권한 체크 함수
+# ======================================================
+async def check_permission(interaction: discord.Interaction) -> bool:
+    user_roles = {r.id for r in interaction.user.roles}
+
+    if user_roles & ALLOWED_ROLES:
+        return True
+
+    # ❌ 권한 없음 → 전체 채널 경고
+    channel = interaction.guild.system_channel or interaction.channel
+
+    await channel.send(
+        f"🚨 누군가 월권을 시도하고있습니다. 토끼님 그를 처벌해주세요\n"
+        f"👤 사용자: {interaction.user.mention} (`{interaction.user.id}`)"
+    )
+
+    return False
+
 
 # ======================================================
 # 🎯 유저 가져오기
@@ -91,7 +123,7 @@ class MoveTeamsView(discord.ui.View):
 
 
 # ======================================================
-# 👤 개별 소환 (음성채널 유저만 표시)
+# 👤 개별 소환 (권한 적용)
 # ======================================================
 class VoiceUserSelect(discord.ui.Select):
     def __init__(self, guild: discord.Guild):
@@ -135,6 +167,11 @@ class SummonUserView(discord.ui.View):
     @discord.ui.button(label="즉시 소환", style=discord.ButtonStyle.green)
     async def summon(self, interaction: discord.Interaction, button: discord.ui.Button):
 
+        # 🔥 권한 체크
+        if not await check_permission(interaction):
+            await interaction.response.send_message("❌ 권한이 없습니다.", ephemeral=True)
+            return
+
         if not interaction.user.voice:
             await interaction.response.send_message("❌ 음성채널 없음", ephemeral=True)
             return
@@ -148,7 +185,6 @@ class SummonUserView(discord.ui.View):
         target = interaction.user.voice.channel
 
         members = []
-
         for uid in self.selected_users:
             m = interaction.guild.get_member(uid)
             if m and m.voice:
@@ -160,7 +196,7 @@ class SummonUserView(discord.ui.View):
 
 
 # ======================================================
-# 📢 채널 소환 (안정 버전)
+# 📢 채널 소환 (권한 적용)
 # ======================================================
 class SummonChannelView(discord.ui.View):
     def __init__(self):
@@ -184,6 +220,11 @@ class SummonChannelView(discord.ui.View):
 
     @discord.ui.button(label="즉시 전체 소환", style=discord.ButtonStyle.green)
     async def summon(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        # 🔥 권한 체크
+        if not await check_permission(interaction):
+            await interaction.response.send_message("❌ 권한이 없습니다.", ephemeral=True)
+            return
 
         if not interaction.user.voice:
             await interaction.response.send_message("❌ 음성채널 없음", ephemeral=True)
@@ -261,7 +302,7 @@ async def summon_channel(interaction: discord.Interaction):
 
 
 # ======================================================
-# 🚀 봇 시작
+# 🚀 시작
 # ======================================================
 @bot.event
 async def on_ready():

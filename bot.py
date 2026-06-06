@@ -66,17 +66,20 @@ def is_valid_nick(nick: str) -> bool:
 
 
 # ======================================================
-# 🔎 /검사 (완전 안정 버전)
+# 🔎 /검사 (전체 공개 버전)
 # ======================================================
 @bot.tree.command(name="검사", guild=GUILD_OBJ)
 async def check_nicknames(interaction: discord.Interaction):
 
     # 🚨 권한 체크
     if not await check_permission(interaction):
-        return await interaction.response.send_message("❌ 권한 없음", ephemeral=True)
+        return await interaction.response.send_message(
+            "❌ 권한 없음",
+            ephemeral=True
+        )
 
-    # ⚡ 즉시 ACK (필수)
-    await interaction.response.defer(ephemeral=True)
+    # ⚡ ACK (필수)
+    await interaction.response.defer()
 
     invalid = []
 
@@ -89,21 +92,36 @@ async def check_nicknames(interaction: discord.Interaction):
         if not is_valid_nick(nick):
             invalid.append(m)
 
+    # =========================
+    # 정상 케이스
+    # =========================
     if not invalid:
-        return await interaction.followup.send("✅ 모든 닉네임 정상입니다")
+        return await interaction.followup.send(
+            "✅ 모든 닉네임 정상입니다",
+            allowed_mentions=discord.AllowedMentions.none()
+        )
 
-    msg = "⚠️ 닉네임 오류 사용자:\n\n"
+    # =========================
+    # 오류 케이스 (전체 공개)
+    # =========================
+    msg = "⚠️ 닉네임 오류 사용자 목록\n\n"
 
-    for m in invalid[:30]:
+    for m in invalid[:50]:
         msg += f"• {m.mention} ({m.nick or m.name})\n"
 
-        # DM 안내
+        # DM 안내 (조용히)
         try:
-            await m.send("⚠️ 닉네임 형식 오류\n형식: 닉네임 / 게임아이디 / 2자리 년생")
+            await m.send(
+                "⚠️ 닉네임 형식 오류\n"
+                "형식: 닉네임 / 게임아이디 / 2자리 년생"
+            )
         except:
             pass
 
-    await interaction.followup.send(msg)
+    await interaction.followup.send(
+        msg,
+        allowed_mentions=discord.AllowedMentions(users=True)
+    )
 
 
 # ======================================================

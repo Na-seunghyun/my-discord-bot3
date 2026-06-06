@@ -134,16 +134,26 @@ class SummonUserView(discord.ui.View):
 # ======================================================
 class SummonChannelView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=120)
+        super().__init__(timeout=300)
+
+        self.selected_channels = set()
 
         self.channel_select = discord.ui.ChannelSelect(
-            placeholder="소환할 음성채널 선택",
+            placeholder="음성채널 선택 (여러개 가능)",
             min_values=1,
             max_values=10,
             channel_types=[discord.ChannelType.voice]
         )
 
         self.add_item(self.channel_select)
+
+    # ✅ 선택 즉시 저장 (핵심 안정 포인트)
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.data.get("component_type") == 3:  # select
+            self.selected_channels = set(interaction.data["values"])
+            await interaction.response.defer()
+            return False
+        return True
 
     @discord.ui.button(label="즉시 전체 소환", style=discord.ButtonStyle.green)
     async def summon(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -154,20 +164,20 @@ class SummonChannelView(discord.ui.View):
             await interaction.followup.send("❌ 음성채널 없음")
             return
 
-        target = interaction.user.voice.channel
-
-        channels = self.channel_select.values  # ✅ 정상
-
-        if not channels:
-            await interaction.followup.send("❌ 채널 선택 안됨")
+        if not self.selected_channels:
+            await interaction.followup.send("❌ 채널 먼저 선택하세요")
             return
+
+        target = interaction.user.voice.channel
 
         members = []
 
-        for ch in channels:
-            for m in ch.members:
-                if not m.bot and m.voice:
-                    members.append(m)
+        for ch_id in self.selected_channels:
+            ch = interaction.guild.get_channel(int(ch_id))
+            if isinstance(ch, discord.VoiceChannel):
+                for m in ch.members:
+                    if not m.bot and m.voice:
+                        members.append(m)
 
         await move_members_fast(members, target)
 

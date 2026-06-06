@@ -31,10 +31,9 @@ VOICE_CHANNEL_IDS = [
 # ---------------------------
 # 🎯 유저 가져오기
 # ---------------------------
-def get_same_voice_members(interaction: discord.Interaction):
+def get_same_voice_members(interaction):
     voice = interaction.user.voice
-
-    if voice is None or voice.channel is None:
+    if not voice or not voice.channel:
         return None, None
 
     return [m for m in voice.channel.members if not m.bot], voice.channel
@@ -43,29 +42,28 @@ def get_same_voice_members(interaction: discord.Interaction):
 # ---------------------------
 # 🎯 팀 생성
 # ---------------------------
-def create_teams(members, size: int):
+def create_teams(members, size):
     random.shuffle(members)
-    return [members[i:i + size] for i in range(0, len(members), size)]
+    return [members[i:i+size] for i in range(0, len(members), size)]
 
 
 # ---------------------------
 # ⚡ 고속 이동
 # ---------------------------
-async def move_members_fast(members, target_channel):
+async def move_members_fast(members, target):
 
-    async def move(member):
-        if member.voice is None:
-            return
-        try:
-            await member.move_to(target_channel)
-        except:
-            pass
+    async def move(m):
+        if m.voice:
+            try:
+                await m.move_to(target)
+            except:
+                pass
 
     await asyncio.gather(*[move(m) for m in members])
 
 
 # ---------------------------
-# 🎮 팀 이동 버튼
+# 🎮 팀 이동
 # ---------------------------
 class MoveTeamsView(discord.ui.View):
     def __init__(self, teams):
@@ -84,16 +82,16 @@ class MoveTeamsView(discord.ui.View):
             if i >= len(VOICE_CHANNEL_IDS):
                 break
 
-            channel = guild.get_channel(VOICE_CHANNEL_IDS[i])
+            ch = guild.get_channel(VOICE_CHANNEL_IDS[i])
 
-            if isinstance(channel, discord.VoiceChannel):
-                await move_members_fast(team, channel)
+            if isinstance(ch, discord.VoiceChannel):
+                await move_members_fast(team, ch)
 
         await interaction.followup.send("✅ 팀 이동 완료")
 
 
 # ======================================================
-# 👤 개별 소환 (정상 안정 버전)
+# 👤 개별 소환 (완전 안정)
 # ======================================================
 class SummonUserView(discord.ui.View):
     def __init__(self):
@@ -108,7 +106,7 @@ class SummonUserView(discord.ui.View):
         self.add_item(self.select)
 
     @discord.ui.button(label="즉시 소환", style=discord.ButtonStyle.green)
-    async def summon(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def summon(self, interaction: discord.Interaction, button):
 
         if not interaction.user.voice:
             await interaction.response.send_message("❌ 음성채널 없음")
@@ -124,7 +122,7 @@ class SummonUserView(discord.ui.View):
 
 
 # ======================================================
-# 📢 채널 소환 (완전 안정 버전)
+# 📢 채널 소환 (🔥 완전 수정 핵심)
 # ======================================================
 class SummonChannelView(discord.ui.View):
     def __init__(self):
@@ -132,28 +130,23 @@ class SummonChannelView(discord.ui.View):
 
         self.selected = set()
 
-        self.select = discord.ui.ChannelSelect(
+        # ❗️ 여기 핵심: options 직접 생성 (절대 ChannelSelect 쓰지 않음)
+        options = [
+            discord.SelectOption(label=ch.name, value=str(ch.id))
+            for ch in bot.get_guild(GUILD_ID).voice_channels
+        ]
+
+        self.select = discord.ui.Select(
             placeholder="음성채널 선택",
             min_values=1,
-            max_values=10,
-            channel_types=[discord.ChannelType.voice]
+            max_values=min(25, len(options)),
+            options=options
         )
 
         self.add_item(self.select)
 
-    # ✔ 선택 즉시 저장 (안전 방식)
-    @discord.ui.select()
-    async def select_callback(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
-
-        self.selected = set(select.values)
-
-        await interaction.response.edit_message(
-            content="채널 선택 완료",
-            view=self
-        )
-
     @discord.ui.button(label="즉시 전체 소환", style=discord.ButtonStyle.green)
-    async def summon(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def summon(self, interaction: discord.Interaction, button):
 
         await interaction.response.defer()
 
@@ -161,15 +154,14 @@ class SummonChannelView(discord.ui.View):
             await interaction.followup.send("❌ 음성채널 없음")
             return
 
-        if not self.selected:
-            await interaction.followup.send("❌ 채널 선택 필요")
-            return
-
         target = interaction.user.voice.channel
+
+        # select 값 여기서 직접 읽기
+        selected = self.select.values
 
         members = []
 
-        for ch_id in self.selected:
+        for ch_id in selected:
             ch = interaction.guild.get_channel(int(ch_id))
             if isinstance(ch, discord.VoiceChannel):
                 for m in ch.members:
@@ -184,17 +176,13 @@ class SummonChannelView(discord.ui.View):
 # ---------------------------
 # 🤖 팀짜기
 # ---------------------------
-@bot.tree.command(name="팀짜기", description="팀 생성", guild=GUILD_OBJ)
+@bot.tree.command(name="팀짜기", guild=GUILD_OBJ)
 async def team(interaction: discord.Interaction, size: int):
 
     members, vc = get_same_voice_members(interaction)
 
     if not members:
         await interaction.response.send_message("❌ 음성채널 없음")
-        return
-
-    if size not in [2, 3, 4]:
-        await interaction.response.send_message("❌ 2~4만 가능")
         return
 
     teams = create_teams(members, size)
@@ -210,7 +198,7 @@ async def team(interaction: discord.Interaction, size: int):
 # ---------------------------
 # 👤 개별소환
 # ---------------------------
-@bot.tree.command(name="개별소환", description="유저 선택 소환", guild=GUILD_OBJ)
+@bot.tree.command(name="개별소환", guild=GUILD_OBJ)
 async def summon_user(interaction: discord.Interaction):
     await interaction.response.send_message("유저 선택", view=SummonUserView(), ephemeral=True)
 
@@ -218,7 +206,7 @@ async def summon_user(interaction: discord.Interaction):
 # ---------------------------
 # 📢 채널소환
 # ---------------------------
-@bot.tree.command(name="채널소환", description="채널 소환", guild=GUILD_OBJ)
+@bot.tree.command(name="채널소환", guild=GUILD_OBJ)
 async def summon_channel(interaction: discord.Interaction):
     await interaction.response.send_message("채널 선택", view=SummonChannelView(), ephemeral=True)
 

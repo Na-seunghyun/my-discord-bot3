@@ -1,11 +1,21 @@
 import discord
 from discord.ext import commands
+import os
+from dotenv import load_dotenv
 import random
+
+load_dotenv()
+
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+# 🔥 서버 ID (너가 준 값)
+GUILD_ID = 1309433603331198977
+GUILD_OBJ = discord.Object(id=GUILD_ID)
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 🔥 음성채널 순서 (이동 기준)
+# 🔥 음성채널 순서
 VOICE_CHANNEL_IDS = [
     1309433603331198982,
     1309750071918723092,
@@ -30,10 +40,7 @@ def get_same_voice_members(interaction: discord.Interaction):
 
     channel = voice.channel
 
-    members = [
-        m for m in channel.members
-        if not m.bot
-    ]
+    members = [m for m in channel.members if not m.bot]
 
     return members, channel
 
@@ -60,7 +67,6 @@ class MoveTeamsView(discord.ui.View):
 
         guild = interaction.guild
 
-        # 기준 채널 index 찾기
         start_index = VOICE_CHANNEL_IDS.index(self.base_channel_id)
 
         for i, team in enumerate(self.teams):
@@ -85,9 +91,9 @@ class MoveTeamsView(discord.ui.View):
 
 
 # ---------------------------
-# 🤖 슬래시 커맨드
+# 🤖 슬래시 커맨드 (GUILD ONLY - 즉시 반영)
 # ---------------------------
-@bot.tree.command(name="팀짜기", description="같은 음성채널 기준 팀 생성")
+@bot.tree.command(name="팀짜기", description="같은 음성채널 기준 팀 생성", guild=GUILD_OBJ)
 async def team(interaction: discord.Interaction, size: int):
 
     result = get_same_voice_members(interaction)
@@ -120,14 +126,15 @@ async def team(interaction: discord.Interaction, size: int):
 
 
 # ---------------------------
-# 🤖 봇 시작
+# 🤖 봇 시작 + GUILD SYNC
 # ---------------------------
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
+
     try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} commands")
+        synced = await bot.tree.sync(guild=GUILD_OBJ)
+        print(f"Synced {len(synced)} commands (guild only)")
     except Exception as e:
         print(e)
 
@@ -135,4 +142,4 @@ async def on_ready():
 # ---------------------------
 # RUN
 # ---------------------------
-bot.run("YOUR_BOT_TOKEN")
+bot.run(TOKEN)

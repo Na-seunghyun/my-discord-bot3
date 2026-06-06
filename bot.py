@@ -131,52 +131,60 @@ class SummonChannelView(discord.ui.View):
         self.selected_channels = set()
 
         self.select = discord.ui.ChannelSelect(
-            placeholder="음성채널 선택 (여러개 가능)",
+            placeholder="음성채널 선택 (즉시 반영)",
             min_values=1,
             max_values=10,
-            channel_types=[discord.ChannelType.voice]  # 🔥 핵심: 음성만
+            channel_types=[discord.ChannelType.voice]
         )
 
+        # 🔥 선택 이벤트 직접 연결
         self.select.callback = self.on_select
         self.add_item(self.select)
 
+    # =========================
+    # ⚡ 즉시 선택 반영
+    # =========================
     async def on_select(self, interaction: discord.Interaction):
-        # 🔥 무조건 여기서만 상태 저장 (중복 응답 방지 핵심)
+
         self.selected_channels = set(self.select.values)
 
-        names = []
-        for ch_id in self.selected_channels:
-            ch = interaction.guild.get_channel(int(ch_id))
-            if ch:
-                names.append(ch.name)
-
+        # 선택만 업데이트 (버튼 상태 유지)
         await interaction.response.edit_message(
-            content=f"✅ 선택됨: {', '.join(names)}",
+            content="✅ 채널 선택 완료 (이제 소환 버튼 사용 가능)",
             view=self
         )
 
+    # =========================
+    # 🚀 즉시 소환 버튼
+    # =========================
     @discord.ui.button(label="즉시 전체 소환", style=discord.ButtonStyle.green)
     async def summon(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         if not interaction.user.voice:
-            await interaction.response.send_message("❌ 음성채널 없음", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ 음성채널에 먼저 들어가세요",
+                ephemeral=True
+            )
             return
 
         if not self.selected_channels:
-            await interaction.response.send_message("❌ 채널 먼저 선택", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ 먼저 채널을 선택하세요",
+                ephemeral=True
+            )
             return
 
         await interaction.response.defer()
 
         target = interaction.user.voice.channel
-        members = []
 
+        members = []
         for ch_id in self.selected_channels:
             ch = interaction.guild.get_channel(int(ch_id))
             if isinstance(ch, discord.VoiceChannel):
                 members.extend([m for m in ch.members if not m.bot])
 
-        # 🔥 고속 이동
+        # ⚡ 초고속 이동
         async def move(member):
             try:
                 await member.move_to(target)

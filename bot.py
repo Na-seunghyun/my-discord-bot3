@@ -128,47 +128,62 @@ class SummonChannelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=300)
 
-        self.selected = set()
+        self.selected_channels = set()
 
-        # ❗️ 여기 핵심: options 직접 생성 (절대 ChannelSelect 쓰지 않음)
-        options = [
-            discord.SelectOption(label=ch.name, value=str(ch.id))
-            for ch in bot.get_guild(GUILD_ID).voice_channels
-        ]
-
-        self.select = discord.ui.Select(
-            placeholder="음성채널 선택",
+        self.select = discord.ui.ChannelSelect(
+            placeholder="음성채널 선택 (여러개 가능)",
             min_values=1,
-            max_values=min(25, len(options)),
-            options=options
+            max_values=10,
+            channel_types=[discord.ChannelType.voice]  # 🔥 핵심: 음성만
         )
 
+        self.select.callback = self.on_select
         self.add_item(self.select)
 
+    async def on_select(self, interaction: discord.Interaction):
+        # 🔥 무조건 여기서만 상태 저장 (중복 응답 방지 핵심)
+        self.selected_channels = set(self.select.values)
+
+        names = []
+        for ch_id in self.selected_channels:
+            ch = interaction.guild.get_channel(int(ch_id))
+            if ch:
+                names.append(ch.name)
+
+        await interaction.response.edit_message(
+            content=f"✅ 선택됨: {', '.join(names)}",
+            view=self
+        )
+
     @discord.ui.button(label="즉시 전체 소환", style=discord.ButtonStyle.green)
-    async def summon(self, interaction: discord.Interaction, button):
+    async def summon(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        if not interaction.user.voice:
+            await interaction.response.send_message("❌ 음성채널 없음", ephemeral=True)
+            return
+
+        if not self.selected_channels:
+            await interaction.response.send_message("❌ 채널 먼저 선택", ephemeral=True)
+            return
 
         await interaction.response.defer()
 
-        if not interaction.user.voice:
-            await interaction.followup.send("❌ 음성채널 없음")
-            return
-
         target = interaction.user.voice.channel
-
-        # select 값 여기서 직접 읽기
-        selected = self.select.values
-
         members = []
 
-        for ch_id in selected:
+        for ch_id in self.selected_channels:
             ch = interaction.guild.get_channel(int(ch_id))
             if isinstance(ch, discord.VoiceChannel):
-                for m in ch.members:
-                    if not m.bot:
-                        members.append(m)
+                members.extend([m for m in ch.members if not m.bot])
 
-        await move_members_fast(members, target)
+        # 🔥 고속 이동
+        async def move(member):
+            try:
+                await member.move_to(target)
+            except:
+                pass
+
+        await asyncio.gather(*[move(m) for m in members])
 
         await interaction.followup.send(f"⚡ {len(members)}명 소환 완료")
 

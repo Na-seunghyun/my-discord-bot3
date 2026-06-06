@@ -9,14 +9,12 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# 🔥 서버 ID
 GUILD_ID = 1309433603331198977
 GUILD_OBJ = discord.Object(id=GUILD_ID)
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 🔥 음성채널 순서
 VOICE_CHANNEL_IDS = [
     1309433603331198982,
     1309750071918723092,
@@ -39,10 +37,7 @@ def get_same_voice_members(interaction: discord.Interaction):
     if voice is None or voice.channel is None:
         return None, None
 
-    channel = voice.channel
-    members = [m for m in channel.members if not m.bot]
-
-    return members, channel
+    return [m for m in voice.channel.members if not m.bot], voice.channel
 
 
 # ---------------------------
@@ -54,7 +49,7 @@ def create_teams(members, size: int):
 
 
 # ---------------------------
-# ⚡ 빠른 이동 핵심 함수
+# ⚡ SAFE + FAST 이동 (핵심 개선)
 # ---------------------------
 async def move_members_fast(members, target_channel):
 
@@ -66,7 +61,13 @@ async def move_members_fast(members, target_channel):
         except:
             pass
 
-    await asyncio.gather(*[move(m) for m in members])
+    # 🔥 5명씩 나눠서 안전 + 빠름
+    batch_size = 5
+
+    for i in range(0, len(members), batch_size):
+        batch = members[i:i+batch_size]
+        await asyncio.gather(*[move(m) for m in batch])
+        await asyncio.sleep(0.05)
 
 
 # ---------------------------
@@ -98,31 +99,30 @@ class MoveTeamsView(discord.ui.View):
 
 
 # ======================================================
-# 👤 개별 소환 (초고속 + 안정)
+# 👤 개별 소환
 # ======================================================
 class SummonUserView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=120)
 
-        self.add_item(
-            discord.ui.UserSelect(
-                placeholder="소환할 유저 선택",
-                min_values=1,
-                max_values=25
-            )
+        self.user_select = discord.ui.UserSelect(
+            placeholder="소환할 유저 선택",
+            min_values=1,
+            max_values=25
         )
+
+        self.add_item(self.user_select)
 
     @discord.ui.button(label="즉시 소환", style=discord.ButtonStyle.green)
     async def summon(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         if not interaction.user.voice:
-            await interaction.response.send_message("❌ 음성채널에 들어가 있어야 합니다.")
+            await interaction.response.send_message("❌ 음성채널 없음")
             return
 
         target = interaction.user.voice.channel
-        select = self.children[0]
 
-        members = [u for u in select.values if u.voice]
+        members = [u for u in self.user_select.values if u.voice]
 
         await move_members_fast(members, target)
 
@@ -130,33 +130,32 @@ class SummonUserView(discord.ui.View):
 
 
 # ======================================================
-# 📢 채널 소환 (초고속 + 안정)
+# 📢 채널 소환
 # ======================================================
 class SummonChannelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=120)
 
-        self.add_item(
-            discord.ui.ChannelSelect(
-                placeholder="소환할 음성채널 선택",
-                min_values=1,
-                max_values=10
-            )
+        self.channel_select = discord.ui.ChannelSelect(
+            placeholder="소환할 음성채널 선택",
+            min_values=1,
+            max_values=10
         )
+
+        self.add_item(self.channel_select)
 
     @discord.ui.button(label="즉시 전체 소환", style=discord.ButtonStyle.green)
     async def summon(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         if not interaction.user.voice:
-            await interaction.response.send_message("❌ 음성채널에 들어가 있어야 합니다.")
+            await interaction.response.send_message("❌ 음성채널 없음")
             return
 
         target = interaction.user.voice.channel
-        select = self.children[0]
 
         members = []
 
-        for ch in select.values:
+        for ch in self.channel_select.values:
             for m in ch.members:
                 if not m.bot and m.voice:
                     members.append(m)
@@ -172,13 +171,7 @@ class SummonChannelView(discord.ui.View):
 @bot.tree.command(name="팀짜기", description="같은 음성채널 기준 팀 생성", guild=GUILD_OBJ)
 async def team(interaction: discord.Interaction, size: int):
 
-    result = get_same_voice_members(interaction)
-
-    if result == (None, None):
-        await interaction.response.send_message("❌ 음성채널에 들어가 있어야 합니다.")
-        return
-
-    members, voice_channel = result
+    members, voice_channel = get_same_voice_members(interaction)
 
     if len(members) == 0:
         await interaction.response.send_message("❌ 음성채널에 사람이 없습니다.")
@@ -196,30 +189,28 @@ async def team(interaction: discord.Interaction, size: int):
         names = ", ".join([m.display_name for m in t])
         msg += f"**팀 {i} ({len(t)}명)**: {names}\n"
 
-    view = MoveTeamsView(teams)
-
-    await interaction.response.send_message(msg, view=view)
+    await interaction.response.send_message(msg, view=MoveTeamsView(teams))
 
 
 # ---------------------------
-# 👤 개별소환 명령어
+# 👤 개별소환
 # ---------------------------
 @bot.tree.command(name="개별소환", description="유저 선택 소환", guild=GUILD_OBJ)
 async def summon_user(interaction: discord.Interaction):
     await interaction.response.send_message(
-        "👤 소환할 유저를 선택하세요",
+        "👤 소환할 유저 선택",
         view=SummonUserView(),
         ephemeral=True
     )
 
 
 # ---------------------------
-# 📢 채널소환 명령어
+# 📢 채널소환
 # ---------------------------
 @bot.tree.command(name="채널소환", description="채널 전체 소환", guild=GUILD_OBJ)
 async def summon_channel(interaction: discord.Interaction):
     await interaction.response.send_message(
-        "📢 소환할 채널을 선택하세요",
+        "📢 소환할 채널 선택",
         view=SummonChannelView(),
         ephemeral=True
     )
@@ -232,11 +223,8 @@ async def summon_channel(interaction: discord.Interaction):
 async def on_ready():
     print(f"Logged in as {bot.user}")
 
-    try:
-        synced = await bot.tree.sync(guild=GUILD_OBJ)
-        print(f"Synced {len(synced)} commands")
-    except Exception as e:
-        print(e)
+    await bot.tree.sync(guild=GUILD_OBJ)
+    print("Synced commands")
 
 
 # ---------------------------

@@ -8,14 +8,14 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# 🔥 서버 ID (너가 준 값)
+# 🔥 서버 ID
 GUILD_ID = 1309433603331198977
 GUILD_OBJ = discord.Object(id=GUILD_ID)
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 🔥 음성채널 순서
+# 🔥 음성채널 순서 (고정 이동 배열)
 VOICE_CHANNEL_IDS = [
     1309433603331198982,
     1309750071918723092,
@@ -30,7 +30,7 @@ VOICE_CHANNEL_IDS = [
 ]
 
 # ---------------------------
-# 🎯 같은 음성채널 유저만 가져오기
+# 🎯 같은 음성채널 유저 가져오기
 # ---------------------------
 def get_same_voice_members(interaction: discord.Interaction):
     voice = interaction.user.voice
@@ -46,7 +46,7 @@ def get_same_voice_members(interaction: discord.Interaction):
 
 
 # ---------------------------
-# 🎯 팀 생성 로직
+# 🎯 팀 생성
 # ---------------------------
 def create_teams(members, size: int):
     random.shuffle(members)
@@ -54,29 +54,25 @@ def create_teams(members, size: int):
 
 
 # ---------------------------
-# 🎮 팀 이동 버튼 UI
+# 🎮 팀 이동 버튼 (FIXED)
 # ---------------------------
 class MoveTeamsView(discord.ui.View):
-    def __init__(self, teams, base_channel_id):
+    def __init__(self, teams):
         super().__init__(timeout=300)
         self.teams = teams
-        self.base_channel_id = base_channel_id
 
     @discord.ui.button(label="팀 이동하기", style=discord.ButtonStyle.green)
     async def move(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         guild = interaction.guild
 
-        start_index = VOICE_CHANNEL_IDS.index(self.base_channel_id)
-
         for i, team in enumerate(self.teams):
 
-            target_index = start_index + i
-
-            if target_index >= len(VOICE_CHANNEL_IDS):
+            # 🔥 무조건 순서대로 배치
+            if i >= len(VOICE_CHANNEL_IDS):
                 break
 
-            target_channel = guild.get_channel(VOICE_CHANNEL_IDS[target_index])
+            target_channel = guild.get_channel(VOICE_CHANNEL_IDS[i])
 
             if not isinstance(target_channel, discord.VoiceChannel):
                 continue
@@ -91,7 +87,7 @@ class MoveTeamsView(discord.ui.View):
 
 
 # ---------------------------
-# 🤖 슬래시 커맨드 (GUILD ONLY - 즉시 반영)
+# 🤖 슬래시 커맨드 (서버 전용)
 # ---------------------------
 @bot.tree.command(name="팀짜기", description="같은 음성채널 기준 팀 생성", guild=GUILD_OBJ)
 async def team(interaction: discord.Interaction, size: int):
@@ -120,7 +116,7 @@ async def team(interaction: discord.Interaction, size: int):
         names = ", ".join([m.display_name for m in team])
         msg += f"**팀 {i} ({len(team)}명)**: {names}\n"
 
-    view = MoveTeamsView(teams, voice_channel.id)
+    view = MoveTeamsView(teams)
 
     await interaction.response.send_message(msg, view=view)
 

@@ -301,10 +301,6 @@ def is_valid_nick(nick: str) -> bool:
 
     return True
 
-
-# ======================================================
-# 🔎 /검사 (전체 공개 버전)
-# ======================================================
 @bot.tree.command(name="검사", guild=GUILD_OBJ)
 async def check_nicknames(interaction: discord.Interaction):
 
@@ -315,7 +311,6 @@ async def check_nicknames(interaction: discord.Interaction):
             ephemeral=True
         )
 
-    # ⚡ ACK (필수)
     await interaction.response.defer()
 
     invalid = []
@@ -330,7 +325,7 @@ async def check_nicknames(interaction: discord.Interaction):
             invalid.append(m)
 
     # =========================
-    # 정상 케이스
+    # 정상
     # =========================
     if not invalid:
         return await interaction.followup.send(
@@ -339,28 +334,17 @@ async def check_nicknames(interaction: discord.Interaction):
         )
 
     # =========================
-    # 오류 케이스 (전체 공개)
+    # 오류
     # =========================
     msg = "⚠️ 닉네임 오류 사용자 목록\n\n"
 
     for m in invalid[:50]:
         msg += f"• {m.mention} ({m.nick or m.name})\n"
 
-        # DM 안내 (조용히)
-        try:
-            await m.send(
-                "⚠️ 닉네임 형식 오류\n"
-                "형식: 닉네임 / 게임아이디 / 2자리 년생"
-            )
-        except:
-            pass
-
     await interaction.followup.send(
         msg,
         allowed_mentions=discord.AllowedMentions(users=True)
     )
-
-
 # ======================================================
 # 🤖 시작
 # ======================================================

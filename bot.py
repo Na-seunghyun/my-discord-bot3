@@ -239,8 +239,8 @@ class SummonUserView(discord.ui.View):
 @bot.tree.command(name="팀짜기", guild=GUILD_OBJ)
 async def team(interaction: discord.Interaction, size: int):
 
-    members, vc = get_same_voice_members(interaction)
-
+    members, vc = get_voice_members(interaction)
+    
     if not members:
         await interaction.response.send_message("❌ 음성채널 없음")
         return

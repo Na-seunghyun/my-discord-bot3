@@ -94,7 +94,32 @@ async def move_members_fast(members, target):
 
 
 # ======================================================
-# 🎮 팀 이동
+# 🔥 채널 상태 체크 (핵심 수정)
+# ======================================================
+def is_channel_free(channel: discord.VoiceChannel) -> bool:
+    return len([m for m in channel.members if not m.bot]) == 0
+
+
+def get_sorted_channels(guild: discord.Guild):
+    channels = []
+    for cid in VOICE_CHANNEL_IDS:
+        ch = guild.get_channel(cid)
+        if isinstance(ch, discord.VoiceChannel):
+            channels.append(ch)
+    return channels
+
+
+def build_channel_queue(guild: discord.Guild):
+    channels = get_sorted_channels(guild)
+
+    free = [ch for ch in channels if is_channel_free(ch)]
+    used = [ch for ch in channels if not is_channel_free(ch)]
+
+    return free + used
+
+
+# ======================================================
+# 🎮 팀 이동 (핵심 수정 완료)
 # ======================================================
 class MoveTeamsView(discord.ui.View):
     def __init__(self, teams):
@@ -106,19 +131,20 @@ class MoveTeamsView(discord.ui.View):
 
         await interaction.response.defer()
 
+        channel_queue = build_channel_queue(interaction.guild)
+
         for i, team in enumerate(self.teams):
-            if i >= 10:
+            if i >= len(channel_queue):
                 break
 
-            ch = interaction.guild.get_channel(VOICE_CHANNEL_IDS[i])
-            if isinstance(ch, discord.VoiceChannel):
-                await move_members_fast(team, ch)
+            target = channel_queue[i]
+            await move_members_fast(team, target)
 
-        await interaction.followup.send("✅ 팀 이동 완료")
+        await interaction.followup.send("✅ 팀 이동 완료 (빈 채널 우선 적용)")
 
 
 # ======================================================
-# 📢 채널 선택 UI (안정 버전)
+# 📢 채널 선택 UI
 # ======================================================
 class SummonChannelView(discord.ui.View):
     def __init__(self):
@@ -170,7 +196,7 @@ class SummonChannelView(discord.ui.View):
 
 
 # ======================================================
-# 👤 개별 소환 (음성 유저만 표시)
+# 👤 개별 소환
 # ======================================================
 class VoiceUserSelect(discord.ui.Select):
     def __init__(self, guild: discord.Guild):
@@ -240,7 +266,7 @@ class SummonUserView(discord.ui.View):
 async def team(interaction: discord.Interaction, size: int):
 
     members, vc = get_voice_members(interaction)
-    
+
     if not members:
         await interaction.response.send_message("❌ 음성채널 없음")
         return
@@ -280,7 +306,7 @@ async def summon_channel(interaction: discord.Interaction):
 
 
 # ======================================================
-# 🎯 닉네임 검사 함수 (🔥 핵심 수정)
+# 🎯 닉네임 검사
 # ======================================================
 def is_valid_nick(nick: str) -> bool:
     if not nick:
@@ -301,15 +327,12 @@ def is_valid_nick(nick: str) -> bool:
 
     return True
 
+
 @bot.tree.command(name="검사", guild=GUILD_OBJ)
 async def check_nicknames(interaction: discord.Interaction):
 
-    # 🚨 권한 체크
     if not await check_permission(interaction):
-        return await interaction.response.send_message(
-            "❌ 권한 없음",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("❌ 권한 없음", ephemeral=True)
 
     await interaction.response.defer()
 
@@ -324,18 +347,9 @@ async def check_nicknames(interaction: discord.Interaction):
         if not is_valid_nick(nick):
             invalid.append(m)
 
-    # =========================
-    # 정상
-    # =========================
     if not invalid:
-        return await interaction.followup.send(
-            "✅ 모든 닉네임 정상입니다",
-            allowed_mentions=discord.AllowedMentions.none()
-        )
+        return await interaction.followup.send("✅ 모든 닉네임 정상입니다")
 
-    # =========================
-    # 오류
-    # =========================
     msg = "⚠️ 닉네임 오류 사용자 목록\n\n"
 
     for m in invalid[:50]:
@@ -345,6 +359,8 @@ async def check_nicknames(interaction: discord.Interaction):
         msg,
         allowed_mentions=discord.AllowedMentions(users=True)
     )
+
+
 # ======================================================
 # 🤖 시작
 # ======================================================

@@ -23,6 +23,24 @@ ALLOWED_ROLES = {
     1317699017056063610
 }
 
+
+# ======================================================
+# 🎯 음성 채널
+# ======================================================
+VOICE_CHANNEL_IDS = [
+    1309433603331198982,
+    1309750071918723092,
+    1310095200487604264,
+    1310095226366595093,
+    1309433603331198983,
+    1313114837764669510,
+    1482445089312870490,
+    1482445011659395275,
+    1483413953844482168,
+    1483414016314314888
+]
+
+
 # ======================================================
 # 🚨 권한 체크
 # ======================================================
@@ -214,6 +232,51 @@ class SummonUserView(discord.ui.View):
 
         await interaction.followup.send(f"⚡ {len(members)}명 소환 완료")
 
+
+# ======================================================
+# 🤖 팀짜기
+# ======================================================
+@bot.tree.command(name="팀짜기", guild=GUILD_OBJ)
+async def team(interaction: discord.Interaction, size: int):
+
+    members, vc = get_same_voice_members(interaction)
+
+    if not members:
+        await interaction.response.send_message("❌ 음성채널 없음")
+        return
+
+    teams = create_teams(members, size)
+
+    msg = f"🎯 팀 결과 ({vc.name})\n\n"
+
+    for i, t in enumerate(teams, 1):
+        msg += f"팀 {i}: " + ", ".join(m.display_name for m in t) + "\n"
+
+    await interaction.response.send_message(msg, view=MoveTeamsView(teams))
+
+
+# ======================================================
+# 👤 개별소환
+# ======================================================
+@bot.tree.command(name="개별소환", guild=GUILD_OBJ)
+async def summon_user(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        "음성채널 유저 선택",
+        view=SummonUserView(interaction.guild),
+        ephemeral=True
+    )
+
+
+# ======================================================
+# 📢 채널소환
+# ======================================================
+@bot.tree.command(name="채널소환", guild=GUILD_OBJ)
+async def summon_channel(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        "채널 선택",
+        view=SummonChannelView(),
+        ephemeral=True
+    )
 
 
 # ======================================================

@@ -8,7 +8,7 @@ import edge_tts
 import uuid
 import re
 from typing import Literal
-
+import emoji
 
 load_dotenv()
 

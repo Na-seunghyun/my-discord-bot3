@@ -517,11 +517,27 @@ async def tts_leave(interaction: discord.Interaction):
     session = tts_sessions.get(guild_id)
 
     if not session:
-        return await interaction.response.send_message("❌ 세션 없음")
+        return await interaction.response.send_message(
+            "❌ TTS 세션이 없습니다. /토끼tts입장 먼저 해주세요",
+            ephemeral=True
+        )
 
-    session["users"].pop(interaction.user.id, None)
+    user_id = interaction.user.id
 
-    if not session["users"]:
+    # 등록 안된 사람
+    if user_id not in session["users"]:
+        return await interaction.response.send_message(
+            "❌ 등록된 사용자가 아닙니다",
+            ephemeral=True
+        )
+
+    # 1️⃣ 유저 제거
+    session["users"].pop(user_id, None)
+
+    remaining = len(session["users"])
+
+    # 2️⃣ 마지막 사용자 → 세션 종료
+    if remaining == 0:
 
         vc = session["vc"]
 
@@ -530,12 +546,23 @@ async def tts_leave(interaction: discord.Interaction):
         except:
             pass
 
+        # worker 종료 신호
         session["queue"].put_nowait(None)
 
         tts_sessions.pop(guild_id, None)
 
-    await interaction.response.send_message("🔇 퇴장 완료")
+        await interaction.response.send_message(
+            "🔇 마지막 사용자가 나가서 TTS 세션이 종료되었습니다.\n👉 다시 /토끼tts입장 해주세요"
+        )
 
+        return
+
+    # 3️⃣ 아직 사용자 남아있음
+    await interaction.response.send_message(
+        f"🔇 퇴장 완료\n"
+        f"👥 현재 사용중: {remaining}/3\n"
+        f"🎤 1자리 남음 (등록 가능)"
+    )
 # ======================================================
 # 🎯 닉네임 검사
 # ======================================================

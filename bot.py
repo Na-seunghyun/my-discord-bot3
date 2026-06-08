@@ -148,8 +148,11 @@ def clean_tts_text(text: str) -> str:
     # 역할 멘션 제거
     text = re.sub(r'<@&\d+>', '', text)
 
-    # 이모지 제거
-    text = emoji.replace_emoji(text, replace='')
+    # 웃음/울음 표현을 TTS 친화적으로 변환
+    text = re.sub(r'ㅋ{3,}', '크크크', text)
+    text = re.sub(r'ㅎ{3,}', '하하하', text)
+    text = re.sub(r'ㅠ{2,}', '흑흑', text)
+    text = re.sub(r'ㅜ{2,}', '흑흑', text)
 
     text = text.strip()
 
@@ -157,7 +160,6 @@ def clean_tts_text(text: str) -> str:
         text = text[:200]
 
     return text
-
 
 async def generate_tts(
     text: str,

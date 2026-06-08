@@ -411,7 +411,7 @@ async def summon_channel(interaction: discord.Interaction):
 @bot.tree.command(name="토끼tts입장", guild=GUILD_OBJ)
 async def tts_join(
     interaction: discord.Interaction,
-    음성: Literal["선희", "인준", "국민", "지민"] = "선희"
+    음성: Literal["선희", "인준", "현수"] = "선희"
 ):
 
     if not interaction.user.voice:
@@ -436,8 +436,7 @@ async def tts_join(
     voice_map = {
         "선희": "ko-KR-SunHiNeural",
         "인준": "ko-KR-InJoonNeural",
-        "국민": "ko-KR-GookMinNeural",
-        "지민": "ko-KR-JiMinNeural"
+        "현수": "ko-KR-HyunsuMultilingualNeural"
     }
 
     tts_voice_settings[guild_id] = voice_map[음성]

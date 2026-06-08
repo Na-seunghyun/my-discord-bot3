@@ -9,6 +9,7 @@ import uuid
 import re
 from typing import Literal
 import emoji
+import traceback
 
 load_dotenv()
 
@@ -216,6 +217,7 @@ async def tts_worker(guild_id: int):
 
         except Exception as e:
             print("TTS 오류:", e)
+            traceback.print_exc()
 
         queue.task_done()
 

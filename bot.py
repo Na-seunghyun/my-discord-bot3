@@ -431,6 +431,7 @@ async def tts_join(interaction: discord.Interaction):
     if guild_id not in active_tts_users:
         active_tts_users[guild_id] = {}
 
+    # 이미 등록된 경우
     if interaction.user.id in active_tts_users[guild_id]:
 
         voice_name = active_tts_users[guild_id][interaction.user.id]
@@ -440,12 +441,14 @@ async def tts_join(interaction: discord.Interaction):
             ephemeral=True
         )
 
+    # 최대 인원 제한
     if len(active_tts_users[guild_id]) >= 3:
         return await interaction.response.send_message(
             "❌ 최대 3명까지만 등록 가능합니다.",
             ephemeral=True
         )
 
+    # 사용 중이지 않은 voice 선택
     used_voices = set(active_tts_users[guild_id].values())
 
     voice_name = next(
@@ -455,15 +458,15 @@ async def tts_join(interaction: discord.Interaction):
 
     active_tts_users[guild_id][interaction.user.id] = voice_name
 
+    # 🎯 핵심 수정: 자동 이동 제거
     channel = interaction.user.voice.channel
-
     vc = interaction.guild.voice_client
 
-    if vc:
-        await vc.move_to(channel)
-    else:
+    if not vc:
         vc = await channel.connect()
+    # ❌ 절대 move_to 하지 않음
 
+    # queue / worker 유지
     if guild_id not in tts_queues:
         tts_queues[guild_id] = asyncio.Queue()
 
@@ -474,6 +477,32 @@ async def tts_join(interaction: discord.Interaction):
 
     await interaction.response.send_message(
         f"🔊 TTS 등록 완료\n🎤 음성: {VOICE_NAMES[voice_name]}"
+    )
+
+
+@bot.tree.command(name="토끼tts이동", guild=GUILD_OBJ)
+async def tts_move(interaction: discord.Interaction):
+
+    vc = interaction.guild.voice_client
+
+    if not vc:
+        return await interaction.response.send_message(
+            "❌ 봇이 음성채널에 없습니다.",
+            ephemeral=True
+        )
+
+    if not interaction.user.voice:
+        return await interaction.response.send_message(
+            "❌ 먼저 음성채널에 접속해주세요.",
+            ephemeral=True
+        )
+
+    target = interaction.user.voice.channel
+
+    await vc.move_to(target)
+
+    await interaction.response.send_message(
+        f"📦 봇 이동 완료 → {target.name}"
     )
 
 
@@ -614,30 +643,23 @@ async def on_voice_state_update(member, before, after):
     if not vc:
         return
 
-    # 등록자가 음성채널에서 나감
+    # 유저가 음성채널 나감
     if after.channel is None:
 
-        active_tts_users[guild_id].pop(
-            member.id,
-            None
-        )
+        active_tts_users[guild_id].pop(member.id, None)
 
-        # 마지막 등록자라면 봇도 퇴장
+        # 마지막 유저면 봇 종료
         if not active_tts_users[guild_id]:
 
-            active_tts_users.pop(
-                guild_id,
-                None
-            )
+            active_tts_users.pop(guild_id, None)
 
             await vc.disconnect()
 
         return
 
-    # 등록자가 다른 음성채널로 이동
-    if vc.channel != after.channel:
-        await vc.move_to(after.channel)
-
+    # ⚠️ 중요: 이동 감지해도 아무것도 하지 않음
+    # → 자동 따라가기 완전히 제거
+    return
 
 # ======================================================
 # 🤖 시작

@@ -132,8 +132,23 @@ def build_channel_queue(guild: discord.Guild):
 
 
 def clean_tts_text(text: str) -> str:
+
+    # URL 제거
     text = re.sub(r'https?://\S+', '', text)
+    text = re.sub(r'www\.\S+', '', text)
+    text = re.sub(r'discord\.gg/\S+', '', text)
+
+    # 멘션 제거
     text = re.sub(r'<@!?\d+>', '누군가', text)
+
+    # 채널 멘션 제거
+    text = re.sub(r'<#\d+>', '', text)
+
+    # 역할 멘션 제거
+    text = re.sub(r'<@&\d+>', '', text)
+
+    # 이모지 제거
+    text = emoji.replace_emoji(text, replace='')
 
     text = text.strip()
 
@@ -394,7 +409,7 @@ async def summon_channel(interaction: discord.Interaction):
 @bot.tree.command(name="토끼tts입장", guild=GUILD_OBJ)
 async def tts_join(
     interaction: discord.Interaction,
-    성별: Literal["여성", "남성"] = "여성"
+    음성: Literal["선희", "인준", "국민", "지민"] = "선희"
 ):
 
     if not interaction.user.voice:
@@ -416,12 +431,14 @@ async def tts_join(
 
     active_tts_users[guild_id] = interaction.user.id
 
-    if 성별 == "남성":
-        voice_name = "ko-KR-InJoonNeural"
-    else:
-        voice_name = "ko-KR-SunHiNeural"
+    voice_map = {
+        "선희": "ko-KR-SunHiNeural",
+        "인준": "ko-KR-InJoonNeural",
+        "국민": "ko-KR-GookMinNeural",
+        "지민": "ko-KR-JiMinNeural"
+    }
 
-    tts_voice_settings[guild_id] = voice_name
+    tts_voice_settings[guild_id] = voice_map[음성]
 
     if guild_id not in tts_queues:
         tts_queues[guild_id] = asyncio.Queue()
@@ -432,7 +449,7 @@ async def tts_join(
         )
 
     await interaction.response.send_message(
-        f"🔊 토끼봇 TTS 활성화\n🎤 음성: {성별}"
+        f"🔊 토끼봇 TTS 활성화\n🎤 음성: {음성}"
     )
 
 
@@ -451,7 +468,6 @@ async def tts_leave(interaction: discord.Interaction):
     await interaction.response.send_message(
         "🔇 토끼봇 TTS 종료"
     )
-
 
 # ======================================================
 # 🎯 닉네임 검사
@@ -542,6 +558,10 @@ async def on_message(message):
         (text, vc)
     )
 
+    try:
+        await message.delete()
+    except:
+        pass
 
 @bot.event
 async def on_voice_state_update(member, before, after):

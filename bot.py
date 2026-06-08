@@ -445,30 +445,6 @@ async def tts_join(interaction: discord.Interaction):
         "🎧 TTS 세션 활성화됨\n👉 이제 /토끼tts등록 사용"
     )
 
-@bot.tree.command(name="토끼tts이동", guild=GUILD_OBJ)
-async def tts_move(interaction: discord.Interaction):
-
-    vc = interaction.guild.voice_client
-
-    if not vc:
-        return await interaction.response.send_message(
-            "❌ 봇이 음성채널에 없습니다.",
-            ephemeral=True
-        )
-
-    if not interaction.user.voice:
-        return await interaction.response.send_message(
-            "❌ 먼저 음성채널에 접속해주세요.",
-            ephemeral=True
-        )
-
-    target = interaction.user.voice.channel
-
-    await vc.move_to(target)
-
-    await interaction.response.send_message(
-        f"📦 봇 이동 완료 → {target.name}"
-    )
 
 @bot.tree.command(name="토끼tts등록", guild=GUILD_OBJ)
 async def tts_register(interaction: discord.Interaction):
@@ -661,15 +637,33 @@ async def on_message(message):
     if message.author.bot or not message.guild:
         return
 
-    guild_id = message.guild.id
-
-    session = tts_sessions.get(guild_id)
+    session = tts_sessions.get(message.guild.id)
     if not session:
         return
 
-    if message.channel.id != TTS_TEXT_CHANNEL_ID:
+    vc = session.get("vc")
+    if not vc or not vc.channel:
         return
 
+    # ==================================================
+    # 🎯 채널 필터 (텍스트 OR 음성채널 기준)
+    # ==================================================
+
+    is_text_channel = (message.channel.id == TTS_TEXT_CHANNEL_ID)
+
+    is_voice_channel = False
+
+    if message.author.voice and message.author.voice.channel:
+        is_voice_channel = (
+            message.author.voice.channel.id == vc.channel.id
+        )
+
+    if not (is_text_channel or is_voice_channel):
+        return
+
+    # ==================================================
+    # 🚫 등록 유저 필터
+    # ==================================================
     if message.author.id not in session["users"]:
         return
 
@@ -686,7 +680,6 @@ async def on_message(message):
         await message.delete()
     except:
         pass
-
 # ======================================================
 # 🚫 voice state (SESSION 구조에서는 비활성)
 # ======================================================

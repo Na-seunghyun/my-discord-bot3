@@ -36,7 +36,7 @@ TTS_TEXT_CHANNEL_ID = 1513451508597788774
 active_tts_users = {}
 tts_queues = {}
 tts_tasks = {}
-
+tts_voice_settings = {}
 # ======================================================
 # 🎯 음성 채널
 # ======================================================
@@ -143,10 +143,14 @@ def clean_tts_text(text: str) -> str:
     return text
 
 
-async def generate_tts(text: str, filename: str):
+async def generate_tts(
+    text: str,
+    filename: str,
+    voice_name: str
+):
     communicate = edge_tts.Communicate(
         text=text,
-        voice="ko-KR-SunHiNeural"
+        voice=voice_name
     )
 
     await communicate.save(filename)
@@ -164,7 +168,16 @@ async def tts_worker(guild_id: int):
 
             filename = f"tts_{uuid.uuid4().hex}.mp3"
 
-            await generate_tts(text, filename)
+            voice_name = tts_voice_settings.get(
+                guild_id,
+                "ko-KR-SunHiNeural"
+            )
+
+            await generate_tts(
+                text,
+                filename,
+                voice_name
+            )
 
             while voice_client.is_playing():
                 await asyncio.sleep(0.2)
@@ -379,7 +392,10 @@ async def summon_channel(interaction: discord.Interaction):
     )
 
 @bot.tree.command(name="토끼tts입장", guild=GUILD_OBJ)
-async def tts_join(interaction: discord.Interaction):
+async def tts_join(
+    interaction: discord.Interaction,
+    성별: Literal["여성", "남성"] = "여성"
+):
 
     if not interaction.user.voice:
         return await interaction.response.send_message(
@@ -400,6 +416,13 @@ async def tts_join(interaction: discord.Interaction):
 
     active_tts_users[guild_id] = interaction.user.id
 
+    if 성별 == "남성":
+        voice_name = "ko-KR-InJoonNeural"
+    else:
+        voice_name = "ko-KR-SunHiNeural"
+
+    tts_voice_settings[guild_id] = voice_name
+
     if guild_id not in tts_queues:
         tts_queues[guild_id] = asyncio.Queue()
 
@@ -409,7 +432,7 @@ async def tts_join(interaction: discord.Interaction):
         )
 
     await interaction.response.send_message(
-        "🔊 토끼봇 TTS 활성화"
+        f"🔊 토끼봇 TTS 활성화\n🎤 음성: {성별}"
     )
 
 

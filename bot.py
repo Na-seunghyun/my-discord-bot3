@@ -4,6 +4,11 @@ import os
 from dotenv import load_dotenv
 import random
 import asyncio
+import edge_tts
+import uuid
+import re
+
+
 
 load_dotenv()
 
@@ -23,11 +28,14 @@ ALLOWED_ROLES = {
     1317699017056063610
 }
 
-
 # ======================================================
 # 🔊 토끼봇 TTS
 # ======================================================
 TTS_TEXT_CHANNEL_ID = 1513451508597788774
+
+active_tts_users = {}
+tts_queues = {}
+tts_tasks = {}
 
 # ======================================================
 # 🎯 음성 채널
@@ -121,6 +129,67 @@ def build_channel_queue(guild: discord.Guild):
     used = [ch for ch in channels if not is_channel_free(ch)]
 
     return free + used
+
+
+def clean_tts_text(text: str) -> str:
+    text = re.sub(r'https?://\S+', '', text)
+    text = re.sub(r'<@!?\d+>', '누군가', text)
+
+    text = text.strip()
+
+    if len(text) > 200:
+        text = text[:200]
+
+    return text
+
+
+async def generate_tts(text: str, filename: str):
+    communicate = edge_tts.Communicate(
+        text=text,
+        voice="ko-KR-SunHiNeural"
+    )
+
+    await communicate.save(filename)
+
+
+async def tts_worker(guild_id: int):
+
+    queue = tts_queues[guild_id]
+
+    while True:
+
+        text, voice_client = await queue.get()
+
+        try:
+
+            filename = f"tts_{uuid.uuid4().hex}.mp3"
+
+            await generate_tts(text, filename)
+
+            while voice_client.is_playing():
+                await asyncio.sleep(0.2)
+
+            finished = asyncio.Event()
+
+            def after_play(error):
+                finished.set()
+
+            voice_client.play(
+                discord.FFmpegPCMAudio(filename),
+                after=after_play
+            )
+
+            await finished.wait()
+
+            try:
+                os.remove(filename)
+            except:
+                pass
+
+        except Exception as e:
+            print("TTS 오류:", e)
+
+        queue.task_done()
 
 
 # ======================================================
@@ -309,6 +378,57 @@ async def summon_channel(interaction: discord.Interaction):
         ephemeral=True
     )
 
+@bot.tree.command(name="토끼tts입장", guild=GUILD_OBJ)
+async def tts_join(interaction: discord.Interaction):
+
+    if not interaction.user.voice:
+        return await interaction.response.send_message(
+            "❌ 음성채널에 먼저 접속해주세요",
+            ephemeral=True
+        )
+
+    channel = interaction.user.voice.channel
+
+    vc = interaction.guild.voice_client
+
+    if vc:
+        await vc.move_to(channel)
+    else:
+        vc = await channel.connect()
+
+    guild_id = interaction.guild.id
+
+    active_tts_users[guild_id] = interaction.user.id
+
+    if guild_id not in tts_queues:
+        tts_queues[guild_id] = asyncio.Queue()
+
+    if guild_id not in tts_tasks:
+        tts_tasks[guild_id] = asyncio.create_task(
+            tts_worker(guild_id)
+        )
+
+    await interaction.response.send_message(
+        "🔊 토끼봇 TTS 활성화"
+    )
+
+
+@bot.tree.command(name="토끼tts퇴장", guild=GUILD_OBJ)
+async def tts_leave(interaction: discord.Interaction):
+
+    guild_id = interaction.guild.id
+
+    active_tts_users.pop(guild_id, None)
+
+    vc = interaction.guild.voice_client
+
+    if vc:
+        await vc.disconnect()
+
+    await interaction.response.send_message(
+        "🔇 토끼봇 TTS 종료"
+    )
+
 
 # ======================================================
 # 🎯 닉네임 검사
@@ -364,6 +484,68 @@ async def check_nicknames(interaction: discord.Interaction):
         msg,
         allowed_mentions=discord.AllowedMentions(users=True)
     )
+
+@bot.event
+async def on_message(message):
+
+    if message.author.bot:
+        return
+
+    if not message.guild:
+        return
+
+    if message.channel.id != TTS_TEXT_CHANNEL_ID:
+        return
+
+    guild_id = message.guild.id
+
+    if guild_id not in active_tts_users:
+        return
+
+    if message.author.id != active_tts_users[guild_id]:
+        return
+
+    vc = message.guild.voice_client
+
+    if not vc:
+        return
+
+    text = clean_tts_text(message.content)
+
+    if not text:
+        return
+
+    await tts_queues[guild_id].put(
+        (text, vc)
+    )
+
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+
+    guild_id = member.guild.id
+
+    if guild_id not in active_tts_users:
+        return
+
+    if active_tts_users[guild_id] != member.id:
+        return
+
+    vc = member.guild.voice_client
+
+    if not vc:
+        return
+
+    if after.channel is None:
+
+        active_tts_users.pop(guild_id, None)
+
+        await vc.disconnect()
+
+        return
+
+    if vc.channel != after.channel:
+        await vc.move_to(after.channel)
 
 
 # ======================================================

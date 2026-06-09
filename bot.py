@@ -638,9 +638,17 @@ async def announce(
 
     global announcement_running
 
+    # 권한 확인
     if not await check_permission(interaction):
         return await interaction.response.send_message(
             "❌ 권한 없음",
+            ephemeral=True
+        )
+
+    # 이미 공지 진행중
+    if announcement_running:
+        return await interaction.response.send_message(
+            "❌ 이미 공지 방송이 진행중입니다.",
             ephemeral=True
         )
 
@@ -655,7 +663,7 @@ async def announce(
             interaction.guild
         )
 
-        # 사람 있는 음성채널 찾기
+        # 사람이 있는 음성채널 찾기
         targets = []
 
         for vc in interaction.guild.voice_channels:
@@ -667,6 +675,12 @@ async def announce(
 
             if humans:
                 targets.append(vc)
+
+        # 공지 시작 안내
+        await interaction.followup.send(
+            f"📢 공지 방송 시작\n"
+            f"🎧 대상 채널: {len(targets)}개"
+        )
 
         count = 0
 
@@ -688,20 +702,35 @@ async def announce(
                 await asyncio.sleep(1)
 
             except Exception as e:
+
                 print(
                     f"공지 실패 {vc.name}",
                     e
                 )
 
+        # 완료 메시지
         await interaction.followup.send(
             f"✅ 공지 완료\n"
             f"📢 방송 채널 수: {count}"
         )
 
+        print(
+            f"[공지 완료] "
+            f"{interaction.user} "
+            f"채널 {count}개"
+        )
+
+    except Exception as e:
+
+        print("공지 오류:", e)
+
+        await interaction.followup.send(
+            f"❌ 공지 중 오류 발생\n{e}"
+        )
+
     finally:
 
         announcement_running = False
-
 
 @bot.tree.command(name="토끼tts도움말", guild=GUILD_OBJ)
 async def tts_help(interaction: discord.Interaction):

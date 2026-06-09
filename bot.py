@@ -516,20 +516,31 @@ async def tts_join(interaction: discord.Interaction):
 
         vc = await channel.connect()
 
+        # 🎧 헤드폰 끄기 (Self Deaf)
+        try:
+            await interaction.guild.change_voice_state(
+                channel=channel,
+                self_deaf=True
+            )
+        except Exception as e:
+            print("Self Deaf 설정 실패:", e)
+
         tts_sessions[guild_id] = {
             "vc": vc,
             "channel_id": channel.id,
             "users": {},
             "queue": asyncio.Queue(),
-            "task": asyncio.create_task(tts_worker(guild_id))
+            "task": asyncio.create_task(
+                tts_worker(guild_id)
+            )
         }
 
     session = tts_sessions[guild_id]
 
     await interaction.response.send_message(
-        "🎧 TTS 세션 활성화됨\n👉 이제 /토끼tts등록 사용"
+        "🎧 TTS 세션 활성화됨\n"
+        "👉 이제 /토끼tts등록 사용"
     )
-
 
 @bot.tree.command(name="토끼tts등록", guild=GUILD_OBJ)
 async def tts_register(interaction: discord.Interaction):
@@ -690,6 +701,18 @@ async def announce(
 
                 voice_client = await vc.connect()
 
+                # 🎧 헤드폰 끄기 (Self Deaf)
+                try:
+                    await interaction.guild.change_voice_state(
+                        channel=vc,
+                        self_deaf=True
+                    )
+                except Exception as e:
+                    print(
+                        "Self Deaf 설정 실패:",
+                        e
+                    )
+
                 await play_announcement(
                     voice_client,
                     내용
@@ -722,7 +745,10 @@ async def announce(
 
     except Exception as e:
 
-        print("공지 오류:", e)
+        print(
+            "공지 오류:",
+            e
+        )
 
         await interaction.followup.send(
             f"❌ 공지 중 오류 발생\n{e}"

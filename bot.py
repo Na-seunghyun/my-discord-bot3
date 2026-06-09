@@ -29,6 +29,12 @@ ALLOWED_ROLES = {
     1317699017056063610
 }
 
+
+# ======================================================
+# 📢 공지 상태
+# ======================================================
+announcement_running = False
+
 # ======================================================
 # 🔊 토끼봇 TTS
 # ======================================================
@@ -226,6 +232,33 @@ async def tts_worker(guild_id: int):
             traceback.print_exc()
 
         queue.task_done()
+
+async def play_announcement(vc, text):
+
+    filename = f"announce_{uuid.uuid4().hex}.mp3"
+
+    try:
+
+        await generate_tts(
+            text,
+            filename,
+            "ko-KR-SunHiNeural"
+        )
+
+        vc.play(
+            discord.FFmpegPCMAudio(filename)
+        )
+
+        while vc.is_playing():
+            await asyncio.sleep(0.2)
+
+    finally:
+
+        try:
+            os.remove(filename)
+        except:
+            pass
+
 
 
 # ======================================================
@@ -541,40 +574,126 @@ async def tts_leave(interaction: discord.Interaction):
     )
 
 
+@bot.tree.command(
+    name="공지",
+    description="전체 음성채널 공지",
+    guild=GUILD_OBJ
+)
+async def announce(
+    interaction: discord.Interaction,
+    내용: str
+):
+
+    global announcement_running
+
+    if not await check_permission(interaction):
+        return await interaction.response.send_message(
+            "❌ 권한 없음",
+            ephemeral=True
+        )
+
+    await interaction.response.defer()
+
+    announcement_running = True
+
+    try:
+
+        # 기존 TTS 종료
+        await shutdown_all_tts(
+            interaction.guild
+        )
+
+        # 사람 있는 음성채널 찾기
+        targets = []
+
+        for vc in interaction.guild.voice_channels:
+
+            humans = [
+                m for m in vc.members
+                if not m.bot
+            ]
+
+            if humans:
+                targets.append(vc)
+
+        count = 0
+
+        for vc in targets:
+
+            try:
+
+                voice_client = await vc.connect()
+
+                await play_announcement(
+                    voice_client,
+                    내용
+                )
+
+                await voice_client.disconnect()
+
+                count += 1
+
+                await asyncio.sleep(1)
+
+            except Exception as e:
+                print(
+                    f"공지 실패 {vc.name}",
+                    e
+                )
+
+        await interaction.followup.send(
+            f"✅ 공지 완료\n"
+            f"📢 방송 채널 수: {count}"
+        )
+
+    finally:
+
+        announcement_running = False
+
+
 @bot.tree.command(name="토끼tts도움말", guild=GUILD_OBJ)
 async def tts_help(interaction: discord.Interaction):
 
     msg = (
         "🎧 **토끼 TTS 사용 방법 안내**\n\n"
-        
+
         "━━━━━━━━━━━━━━━━━━\n"
         "1️⃣ `/토끼tts입장`\n"
         "👉 TTS 시스템을 시작합니다\n"
         "👉 봇이 음성채널에 입장합니다\n\n"
-        
+
         "2️⃣ `/토끼tts등록`\n"
         "👉 최대 3명까지 등록 가능합니다\n"
         "👉 등록된 사용자만 채팅이 TTS로 읽힙니다\n"
         "👉 자동으로 목소리가 배정됩니다 (선희 / 인준 / 현수)\n\n"
-        
+
         "3️⃣ 채팅 사용\n"
         "👉 지정된 텍스트 채널에 메시지를 입력하면 자동 음성 변환됩니다\n"
         "👉 등록되지 않은 사용자는 반응하지 않습니다\n\n"
-        
+
         "4️⃣ `/토끼tts퇴장`\n"
         "👉 본인만 TTS 등록을 해제합니다\n"
         "👉 모든 사용자가 나가면 TTS 세션이 종료됩니다\n"
         "👉 마지막 사용자 퇴장 시 봇도 음성채널에서 나갑니다\n\n"
-        
+
+        "5️⃣ `/공지 내용`\n"
+        "👉 권한이 있는 운영자만 사용 가능합니다\n"
+        "👉 사람이 있는 모든 음성채널에 순차적으로 공지를 방송합니다\n"
+        "👉 공지 시작 시 현재 TTS 세션은 자동 종료됩니다\n"
+        "👉 공지 종료 후 필요 시 다시 `/토끼tts입장` 해주세요\n\n"
+
         "━━━━━━━━━━━━━━━━━━\n"
         "⚠️ 규칙\n"
         "• 최대 3명까지 동시 사용 가능\n"
         "• 채널 이동 시 봇은 따라가지 않습니다\n"
         "• 반드시 입장 → 등록 순서로 사용하세요\n"
+        "• 운영자가 `/공지`를 실행하면 현재 TTS 세션은 종료됩니다\n"
     )
 
-    await interaction.response.send_message(msg, ephemeral=True)
-
+    await interaction.response.send_message(
+        msg,
+        ephemeral=True
+    )
 
 # ======================================================
 # 🎯 닉네임 검사
@@ -637,6 +756,11 @@ async def on_message(message):
     if message.author.bot or not message.guild:
         return
 
+    global announcement_running
+
+    if announcement_running:
+        return
+        
     session = tts_sessions.get(message.guild.id)
     if not session:
         return

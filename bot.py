@@ -233,6 +233,10 @@ async def tts_worker(guild_id: int):
 
         queue.task_done()
 
+
+# ======================================================
+# 📢 공지용 음성 재생
+# ======================================================
 async def play_announcement(vc, text):
 
     filename = f"announce_{uuid.uuid4().hex}.mp3"
@@ -252,6 +256,9 @@ async def play_announcement(vc, text):
         while vc.is_playing():
             await asyncio.sleep(0.2)
 
+    except Exception as e:
+        print("공지 재생 오류:", e)
+
     finally:
 
         try:
@@ -260,6 +267,51 @@ async def play_announcement(vc, text):
             pass
 
 
+# ======================================================
+# 📢 기존 TTS 강제 종료
+# ======================================================
+async def shutdown_all_tts(guild):
+
+    guild_id = guild.id
+
+    session = tts_sessions.get(guild_id)
+
+    if not session:
+        return
+
+    try:
+
+        channel = guild.get_channel(
+            TTS_TEXT_CHANNEL_ID
+        )
+
+        if channel:
+            await channel.send(
+                "⚠️ 운영자 공지 방송이 시작되어 현재 TTS 세션이 종료되었습니다.\n"
+                "필요 시 다시 `/토끼tts입장` 후 이용해주세요."
+            )
+
+    except Exception as e:
+        print("공지 안내 실패:", e)
+
+    try:
+
+        vc = session["vc"]
+
+        if vc.is_playing():
+            vc.stop()
+
+        await vc.disconnect()
+
+    except Exception as e:
+        print("음성 연결 종료 실패:", e)
+
+    try:
+        session["queue"].put_nowait(None)
+    except:
+        pass
+
+    tts_sessions.pop(guild_id, None)
 
 # ======================================================
 # 🎮 팀 이동 (핵심 수정 완료)

@@ -810,6 +810,11 @@ async def tts_help(interaction: discord.Interaction):
 # 🎯 닉네임 검사
 # ======================================================
 def is_valid_nick(nick: str) -> bool:
+
+    # 게스트는 검사 제외
+    if "게스트" in nick:
+        return True
+
     if not nick:
         return False
 
@@ -833,11 +838,15 @@ def is_valid_nick(nick: str) -> bool:
 async def check_nicknames(interaction: discord.Interaction):
 
     if not await check_permission(interaction):
-        return await interaction.response.send_message("❌ 권한 없음", ephemeral=True)
+        return await interaction.response.send_message(
+            "❌ 권한 없음",
+            ephemeral=True
+        )
 
     await interaction.response.defer()
 
     invalid = []
+    guests = []
 
     for m in interaction.guild.members:
         if m.bot:
@@ -845,22 +854,36 @@ async def check_nicknames(interaction: discord.Interaction):
 
         nick = m.nick or m.name
 
+        # 게스트 목록 수집
+        if "게스트" in nick:
+            guests.append(m)
+            continue
+
         if not is_valid_nick(nick):
             invalid.append(m)
 
-    if not invalid:
-        return await interaction.followup.send("✅ 모든 닉네임 정상입니다")
+    msg = ""
 
-    msg = "⚠️ 닉네임 오류 사용자 목록\n\n"
+    # 오류 사용자
+    if invalid:
+        msg += "⚠️ 닉네임 오류 사용자 목록\n\n"
 
-    for m in invalid[:50]:
-        msg += f"• {m.mention} ({m.nick or m.name})\n"
+        for m in invalid[:50]:
+            msg += f"• {m.mention} ({m.nick or m.name})\n"
+    else:
+        msg += "✅ 닉네임 형식 오류 없음\n"
+
+    # 게스트 목록
+    if guests:
+        msg += "\n\n🎟️ 게스트 목록\n\n"
+
+        for m in guests[:50]:
+            msg += f"• {m.mention} ({m.nick or m.name})\n"
 
     await interaction.followup.send(
         msg,
         allowed_mentions=discord.AllowedMentions(users=True)
     )
-
 @bot.event
 async def on_message(message):
 

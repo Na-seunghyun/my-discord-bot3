@@ -603,40 +603,44 @@ async def tts_leave(interaction: discord.Interaction):
             ephemeral=True
         )
 
-    # 1️⃣ 유저 제거
+    # 유저 제거
     session["users"].pop(user_id, None)
 
     remaining = len(session["users"])
 
-    # 2️⃣ 마지막 사용자 → 세션 종료
+    # 마지막 사용자 → 세션 종료
     if remaining == 0:
 
-        vc = session["vc"]
+        vc = session.get("vc")
 
         try:
-            await vc.disconnect()
-        except:
+            if vc and vc.is_connected():
+                await vc.disconnect()
+        except Exception:
             pass
 
         # worker 종료 신호
-        session["queue"].put_nowait(None)
+        try:
+            session["queue"].put_nowait(None)
+        except Exception:
+            pass
 
         tts_sessions.pop(guild_id, None)
 
-        await interaction.response.send_message(
-            "🔇 마지막 사용자가 나가서 TTS 세션이 종료되었습니다.\n👉 다시 /토끼tts입장 해주세요"
+        return await interaction.response.send_message(
+            "🔇 마지막 사용자가 퇴장했습니다.\n"
+            "🛑 TTS 세션이 자동 종료되었습니다."
         )
 
-        return
+    # 아직 사용자 남아있음
+    available = 3 - remaining
 
-    # 3️⃣ 아직 사용자 남아있음
     await interaction.response.send_message(
-        f"🔇 퇴장 완료\n"
+        f"🔇 TTS 등록 해제 완료\n"
         f"👥 현재 사용중: {remaining}/3\n"
-        f"🎤 1자리 남음 (등록 가능)"
+        f"🎤 남은 등록 가능 인원: {available}명"
     )
-
-
+    
 @bot.tree.command(
     name="공지",
     description="전체 음성채널 공지",
@@ -912,12 +916,68 @@ async def on_message(message):
     except:
         pass
 # ======================================================
-# 🚫 voice state (SESSION 구조에서는 비활성)
+# 🎤 등록 사용자 자동 해제
 # ======================================================
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # session 기반 구조에서는 아무것도 하지 않음
-    return
+
+    session = tts_sessions.get(member.guild.id)
+
+    if not session:
+        return
+
+    vc = session.get("vc")
+
+    if not vc or not vc.channel:
+        return
+
+    # 등록자가 아니면 무시
+    if member.id not in session["users"]:
+        return
+
+    # 토끼봇이 있는 채널을 떠난 경우
+    # (다른 채널 이동 / 연결 끊김 모두 포함)
+    if before.channel == vc.channel and after.channel != vc.channel:
+
+        session["users"].pop(member.id, None)
+
+        print(
+            f"[TTS] 자동 등록 해제: "
+            f"{member.display_name} ({member.id})"
+        )
+
+        remaining = len(session["users"])
+
+        print(
+            f"[TTS] 남은 등록자: {remaining}명"
+        )
+
+        # 등록자 전부 사라짐
+        if remaining == 0:
+
+            print(
+                f"[TTS] 등록자 없음 → 세션 종료 시작 "
+                f"(Guild: {member.guild.name})"
+            )
+
+            try:
+                session["queue"].put_nowait(None)
+                print("[TTS] Worker 종료 신호 전송")
+            except Exception as e:
+                print(f"[TTS] Queue 종료 신호 실패: {e}")
+
+            try:
+                await vc.disconnect()
+                print("[TTS] 음성채널 연결 해제")
+            except Exception as e:
+                print(f"[TTS] 음성채널 해제 실패: {e}")
+
+            tts_sessions.pop(member.guild.id, None)
+
+            print(
+                f"[TTS] 세션 삭제 완료 "
+                f"(Guild: {member.guild.name})"
+            )
     
 # ======================================================
 # 🤖 시작

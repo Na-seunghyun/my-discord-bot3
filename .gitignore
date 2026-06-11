@@ -1,0 +1,6 @@
+.env
+venv/
+*.mp3
+gamble_data.json
+__pycache__/
+*.pyc.env

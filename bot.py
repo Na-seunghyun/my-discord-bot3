@@ -47,28 +47,16 @@ tts_sessions = {}
 VOICE_OPTIONS = {
     "여자1": "ko-KR-SunHiNeural",
     "남자1": "ko-KR-InJoonNeural",
-    "남자2": "ko-KR-HyunsuMultilingualNeural",
-    "남자3": "ko-KR-BongJinNeural",
-    "남자4": "ko-KR-GookMinNeural",
-    "남자5": "ko-KR-HyunsuNeural",
-    "여자2": "ko-KR-JiMinNeural",
-    "여자3": "ko-KR-SeoHyeonNeural",
-    "여자4": "ko-KR-SoonBokNeural",
-    "여자5": "ko-KR-YuJinNeural"
+    "남자2": "ko-KR-HyunsuMultilingualNeural"
 }
 
 VOICE_NAMES = {
     "ko-KR-SunHiNeural": "여자1",
     "ko-KR-InJoonNeural": "남자1",
-    "ko-KR-HyunsuMultilingualNeural": "남자2",
-    "ko-KR-BongJinNeural": "남자3",
-    "ko-KR-GookMinNeural": "남자4",
-    "ko-KR-HyunsuNeural": "남자5",
-    "ko-KR-JiMinNeural": "여자2",
-    "ko-KR-SeoHyeonNeural": "여자3",
-    "ko-KR-SoonBokNeural": "여자4",
-    "ko-KR-YuJinNeural": "여자5"
+    "ko-KR-HyunsuMultilingualNeural": "남자2"
 }
+
+DEFAULT_TTS_VOICE = "ko-KR-SunHiNeural"
 
 # ======================================================
 # 🎯 음성 채널
@@ -294,12 +282,25 @@ async def generate_tts(
     filename: str,
     voice_name: str
 ):
+    if voice_name not in VOICE_NAMES:
+        voice_name = DEFAULT_TTS_VOICE
+
     communicate = edge_tts.Communicate(
         text=text,
         voice=voice_name
     )
 
-    await communicate.save(filename)
+    try:
+        await communicate.save(filename)
+    except Exception:
+        if voice_name == DEFAULT_TTS_VOICE:
+            raise
+
+        communicate = edge_tts.Communicate(
+            text=text,
+            voice=DEFAULT_TTS_VOICE
+        )
+        await communicate.save(filename)
 
 
 async def tts_worker(guild_id: int):
@@ -711,10 +712,7 @@ async def tts_join(interaction: discord.Interaction):
 @bot.tree.command(name="토끼tts등록", guild=GUILD_OBJ)
 async def tts_register(
     interaction: discord.Interaction,
-    목소리: Literal[
-        "여자1", "여자2", "여자3", "여자4", "여자5",
-        "남자1", "남자2", "남자3", "남자4", "남자5"
-    ]
+    목소리: Literal["여자1", "남자1", "남자2"]
 ):
 
     guild_id = interaction.guild.id
@@ -1011,7 +1009,7 @@ async def tts_help(interaction: discord.Interaction):
         "2️⃣ `/토끼tts등록 목소리`\n"
         "👉 원하는 목소리를 선택해 등록합니다\n"
         "👉 등록된 사용자만 채팅이 TTS로 읽힙니다\n"
-        "👉 목소리는 여자1~5 / 남자1~5 중 선택할 수 있습니다\n"
+        "👉 목소리는 여자1 / 남자1 / 남자2 중 선택할 수 있습니다\n"
         "👉 이미 등록된 사용자는 같은 명령어로 목소리를 바꿀 수 있습니다\n\n"
 
         "3️⃣ 채팅 사용\n"

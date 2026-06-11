@@ -76,6 +76,7 @@ VOICE_CHANNEL_IDS = [
 
 GAMBLE_DATA_FILE = "gamble_data.json"
 GAMBLE_DAILY_ALLOWANCE = 500
+GAMBLE_DATA_VERSION = 2
 GAMBLE_WIN_RATE = 0.45
 KST = timezone(timedelta(hours=9))
 gamble_lock = asyncio.Lock()
@@ -160,10 +161,16 @@ def get_gamble_account(data: dict, user_id: int) -> dict:
             "profit": 0,
             "daily_bonus": GAMBLE_DAILY_ALLOWANCE,
             "day": day_key,
+            "version": GAMBLE_DATA_VERSION,
             "wins": 0,
             "losses": 0
         }
     )
+
+    if int(account.get("version", 0)) < GAMBLE_DATA_VERSION:
+        account["daily_bonus"] = GAMBLE_DAILY_ALLOWANCE
+        account["day"] = day_key
+        account["version"] = GAMBLE_DATA_VERSION
 
     if "weekly_bonus" in account:
         account.pop("weekly_bonus", None)
@@ -179,6 +186,7 @@ def get_gamble_account(data: dict, user_id: int) -> dict:
 
     account.setdefault("profit", 0)
     account.setdefault("daily_bonus", GAMBLE_DAILY_ALLOWANCE)
+    account.setdefault("version", GAMBLE_DATA_VERSION)
     account.setdefault("wins", 0)
     account.setdefault("losses", 0)
 

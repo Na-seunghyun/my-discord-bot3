@@ -74,6 +74,7 @@ VOICE_CHANNEL_IDS = [
 
 GAMBLE_DATA_FILE = "gamble_data.json"
 GAMBLE_WEEKLY_ALLOWANCE = 500
+GAMBLE_WIN_RATE = 0.45
 gamble_lock = asyncio.Lock()
 
 GAMBLE_WIN_MESSAGES = [
@@ -1054,7 +1055,7 @@ async def gamble(interaction: discord.Interaction, 배팅금액: int):
                 ephemeral=True
             )
 
-        win = random.choice([True, False])
+        win = random.random() < GAMBLE_WIN_RATE
 
         if win:
             account["profit"] = int(account.get("profit", 0)) + 배팅금액

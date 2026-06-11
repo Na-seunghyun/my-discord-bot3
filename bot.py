@@ -1373,55 +1373,6 @@ async def announce(
 
         announcement_running = False
 
-@bot.tree.command(name="토끼tts도움말", guild=GUILD_OBJ)
-async def tts_help(interaction: discord.Interaction):
-
-    msg = (
-        "🎧 **토끼 TTS 사용 방법 안내**\n\n"
-
-        "━━━━━━━━━━━━━━━━━━\n"
-        "1️⃣ `/토끼tts등록 목소리`\n"
-        "👉 봇이 자동으로 음성채널에 입장하고 사용자를 등록합니다\n"
-        "👉 원하는 목소리를 선택해 등록합니다\n"
-        "👉 등록된 사용자만 채팅이 TTS로 읽힙니다\n"
-        "👉 목소리는 여자1 / 남자1 / 남자2 중 선택할 수 있습니다\n"
-        "👉 이미 등록된 사용자는 같은 명령어로 목소리를 바꿀 수 있습니다\n\n"
-
-        "2️⃣ 채팅 사용\n"
-        "👉 지정된 텍스트 채널에 메시지를 입력하면 자동 음성 변환됩니다\n"
-        "👉 등록되지 않은 사용자는 반응하지 않습니다\n\n"
-
-        "3️⃣ `/토끼tts퇴장`\n"
-        "👉 본인만 TTS 등록을 해제합니다\n"
-        "👉 모든 사용자가 나가면 TTS 세션이 종료됩니다\n"
-        "👉 마지막 사용자 퇴장 시 봇도 음성채널에서 나갑니다\n\n"
-
-        "4️⃣ `/토끼tts상태`\n"
-        "👉 현재 TTS 채널, 등록자, 대기 문장 수를 확인합니다\n\n"
-
-        "5️⃣ `/토끼tts강제종료`\n"
-        "👉 운영자가 TTS 세션을 즉시 종료합니다\n\n"
-
-        "6️⃣ `/공지 내용`\n"
-        "👉 권한이 있는 운영자만 사용 가능합니다\n"
-        "👉 사람이 있는 모든 음성채널에 순차적으로 공지를 방송합니다\n"
-        "👉 공지 시작 시 현재 TTS 세션은 자동 종료됩니다\n"
-        "👉 공지 종료 후 필요 시 다시 `/토끼tts등록 목소리`를 사용해주세요\n\n"
-
-        "━━━━━━━━━━━━━━━━━━\n"
-        "⚠️ 규칙\n"
-        "• 등록 인원 제한은 없습니다\n"
-        "• 여러 사람이 같은 목소리를 선택해도 됩니다\n"
-        "• 채널 이동 시 봇은 따라가지 않습니다\n"
-        "• `/토끼tts등록 목소리`만 사용해도 TTS가 시작됩니다\n"
-        "• 운영자가 `/공지`를 실행하면 현재 TTS 세션은 종료됩니다\n"
-    )
-
-    await interaction.response.send_message(
-        msg
-    )
-
-
 @bot.tree.command(name="토끼봇도움말", guild=GUILD_OBJ)
 async def rabbit_bot_help(interaction: discord.Interaction):
     await interaction.response.send_message(

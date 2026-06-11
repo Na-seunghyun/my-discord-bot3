@@ -81,6 +81,7 @@ GAMBLE_DATA_VERSION = 2
 GAMBLE_WIN_RATE = 0.45
 KST = timezone(timedelta(hours=9))
 gamble_lock = asyncio.Lock()
+DONATION_QR_FILE = "donation_qr.jpg"
 
 GAMBLE_WIN_MESSAGES = [
     "🎰 잭팟은 아니지만 손맛은 확실합니다!",
@@ -862,6 +863,88 @@ class SummonUserView(discord.ui.View):
 
 
 # ======================================================
+# 🐰 토끼봇 도움말 UI
+# ======================================================
+class RabbitBotHelpView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+
+    @discord.ui.button(label="기능소개", style=discord.ButtonStyle.primary)
+    async def features(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "🐰 **토끼봇 기능소개**\n\n"
+            "🎧 TTS: 채팅을 음성으로 읽어줍니다.\n"
+            "🎲 도박: 매일 지급되는 가상 금액으로 가볍게 즐깁니다.\n"
+            "🔮 사주/운세: 생년월일과 시간으로 재미용 운세를 봅니다.\n"
+            "🎮 팀짜기/소환: 음성채널 인원을 나누거나 이동시킵니다.\n"
+            "📋 검사/공지: 운영자를 위한 관리 기능입니다.",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="TTS 사용법", style=discord.ButtonStyle.primary)
+    async def tts(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "🎧 **TTS 사용법**\n\n"
+            "1. 음성채널에 먼저 접속\n"
+            "2. `/토끼tts등록 목소리` 사용\n"
+            "3. 채팅을 입력하면 봇이 읽어줍니다\n"
+            "4. 종료할 때는 `/토끼tts퇴장`\n\n"
+            "목소리: 여자1 / 남자1 / 남자2\n"
+            "상태 확인: `/토끼tts상태`\n"
+            "운영자 종료: `/토끼tts강제종료`",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="도박 안내", style=discord.ButtonStyle.success)
+    async def gamble_info(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "🎲 **도박 안내**\n\n"
+            "`/도박 배팅금액` - 가상 금액으로 도박\n"
+            "`/도박잔액` - 내 잔액과 전적 확인\n"
+            "`/도박명예의전당` - 잔액 랭킹 확인\n\n"
+            "매일 한국시간 기준 기본금 500원이 지급됩니다.\n"
+            "기본금은 누적되지 않고, 도박 수익금은 유지됩니다.\n"
+            "실제 돈이 아닌 서버 내 재미용 가상 금액입니다.",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="사주/운세", style=discord.ButtonStyle.secondary)
+    async def saju_info(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "🔮 **사주/운세 안내**\n\n"
+            "`/사주운세 생년월일 태어난시간`\n"
+            "- 짧은 오늘 운세를 봅니다.\n\n"
+            "`/사주풀이 생년월일 태어난시간`\n"
+            "- 성향, 오행, 재물운, 관계운, 승부운을 자세히 봅니다.\n\n"
+            "예시: `/사주풀이 2000-01-23 14:30`\n"
+            "개인정보는 저장하지 않고, 실행할 때만 계산합니다.",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="후원", style=discord.ButtonStyle.danger)
+    async def donate(self, interaction: discord.Interaction, button: discord.ui.Button):
+        msg = (
+            "💛 **토끼봇 후원하기**\n\n"
+            "봇 운영과 서버 유지에 도움이 됩니다.\n"
+            "후원은 선택이며, 항상 감사합니다!"
+        )
+
+        if os.path.exists(DONATION_QR_FILE):
+            await interaction.response.send_message(
+                msg,
+                file=discord.File(DONATION_QR_FILE),
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                msg + "\n\n"
+                f"⚠️ 후원 QR 이미지 파일이 아직 서버에 없습니다.\n"
+                f"`{DONATION_QR_FILE}` 파일을 `bot.py`와 같은 위치에 올려주세요.",
+                ephemeral=True
+            )
+
+
+# ======================================================
 # 🤖 팀짜기
 # ======================================================
 @bot.tree.command(name="팀짜기", guild=GUILD_OBJ)
@@ -1336,6 +1419,15 @@ async def tts_help(interaction: discord.Interaction):
 
     await interaction.response.send_message(
         msg
+    )
+
+
+@bot.tree.command(name="토끼봇도움말", guild=GUILD_OBJ)
+async def rabbit_bot_help(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        "🐰 **토끼봇 도움말**\n\n"
+        "아래 버튼을 눌러 필요한 안내를 확인하세요.",
+        view=RabbitBotHelpView()
     )
 
 

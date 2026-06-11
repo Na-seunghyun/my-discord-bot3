@@ -199,39 +199,44 @@ async def tts_worker(guild_id: int):
 
         item = await queue.get()
 
-        if item is None:
-            break
-
-        text, voice_name = item
-
-        vc = session["vc"]
-
         try:
-            filename = f"tts_{uuid.uuid4().hex}.mp3"
+            if item is None:
+                break
 
-            await generate_tts(
-                text,
-                filename,
-                voice_name
-            )
+            text, voice_name = item
 
-            audio = discord.FFmpegPCMAudio(filename)
-
-            vc.play(audio)
-
-            while vc.is_playing():
-                await asyncio.sleep(0.1)
+            vc = session["vc"]
+            filename = None
 
             try:
-                os.remove(filename)
-            except:
-                pass
+                filename = f"tts_{uuid.uuid4().hex}.mp3"
 
-        except Exception as e:
-            print("TTS 오류:", e)
-            traceback.print_exc()
+                await generate_tts(
+                    text,
+                    filename,
+                    voice_name
+                )
 
-        queue.task_done()
+                audio = discord.FFmpegPCMAudio(filename)
+
+                vc.play(audio)
+
+                while vc.is_playing():
+                    await asyncio.sleep(0.1)
+
+            except Exception as e:
+                print("TTS 오류:", e)
+                traceback.print_exc()
+
+            finally:
+                if filename:
+                    try:
+                        os.remove(filename)
+                    except:
+                        pass
+
+        finally:
+            queue.task_done()
 
 
 # ======================================================
@@ -323,6 +328,9 @@ class MoveTeamsView(discord.ui.View):
 
     @discord.ui.button(label="팀 이동하기", style=discord.ButtonStyle.green)
     async def move(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        if not await check_permission(interaction):
+            return await interaction.response.send_message("❌ 권한 없음", ephemeral=True)
 
         await interaction.response.defer()
 
@@ -466,6 +474,17 @@ async def team(interaction: discord.Interaction, size: int):
         await interaction.response.send_message("❌ 음성채널 없음")
         return
 
+    if size < 1:
+        await interaction.response.send_message("❌ 팀 인원은 1명 이상이어야 합니다.", ephemeral=True)
+        return
+
+    if size > len(members):
+        await interaction.response.send_message(
+            f"❌ 현재 음성채널 인원은 {len(members)}명입니다. 팀 인원을 더 작게 입력해주세요.",
+            ephemeral=True
+        )
+        return
+
     teams = create_teams(members, size)
 
     msg = f"🎯 팀 결과 ({vc.name})\n\n"
@@ -481,6 +500,21 @@ async def team(interaction: discord.Interaction, size: int):
 # ======================================================
 @bot.tree.command(name="개별소환", guild=GUILD_OBJ)
 async def summon_user(interaction: discord.Interaction):
+
+    if not await check_permission(interaction):
+        return await interaction.response.send_message("❌ 권한 없음", ephemeral=True)
+
+    voice_members = [
+        m for m in interaction.guild.members
+        if m.voice and m.voice.channel and not m.bot
+    ]
+
+    if not voice_members:
+        return await interaction.response.send_message(
+            "❌ 현재 음성채널에 소환할 유저가 없습니다.",
+            ephemeral=True
+        )
+
     await interaction.response.send_message(
         "음성채널 유저 선택",
         view=SummonUserView(interaction.guild),
@@ -493,6 +527,13 @@ async def summon_user(interaction: discord.Interaction):
 # ======================================================
 @bot.tree.command(name="채널소환", guild=GUILD_OBJ)
 async def summon_channel(interaction: discord.Interaction):
+
+    if not await check_permission(interaction):
+        return await interaction.response.send_message("❌ 권한 없음", ephemeral=True)
+
+    if not interaction.user.voice:
+        return await interaction.response.send_message("❌ 음성채널 없음", ephemeral=True)
+
     await interaction.response.send_message(
         "채널 선택",
         view=SummonChannelView(),
@@ -510,6 +551,19 @@ async def tts_join(interaction: discord.Interaction):
 
     guild_id = interaction.guild.id
     channel = interaction.user.voice.channel
+
+    session = tts_sessions.get(guild_id)
+
+    if session:
+        vc = session.get("vc")
+
+        if not vc or not vc.is_connected():
+            try:
+                session["queue"].put_nowait(None)
+            except:
+                pass
+
+            tts_sessions.pop(guild_id, None)
 
     # 세션 생성
     if guild_id not in tts_sessions:

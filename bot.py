@@ -265,10 +265,18 @@ def clean_tts_text(text: str) -> str:
     text = re.sub(r'<@&\d+>', '', text)
 
     # 웃음/울음 표현을 TTS 친화적으로 변환
-    text = re.sub(r'ㅋ{3,}', '크크크', text)
-    text = re.sub(r'ㅎ{3,}', '하하하', text)
+    text = re.sub(r'ㅋ{2,}', '크크', text)
+    text = re.sub(r'ㅎ{2,}', '하하', text)
     text = re.sub(r'ㅠ{2,}', '흑흑', text)
     text = re.sub(r'ㅜ{2,}', '흑흑', text)
+    text = re.sub(r'ㄱ{2,}', '기역기역', text)
+    text = re.sub(r'ㅇ{2,}', '응응', text)
+    text = re.sub(r'ㄴ{2,}', '니은니은', text)
+    text = re.sub(r'ㅂ{2,}', '비읍비읍', text)
+    text = re.sub(r'ㅋ', '크', text)
+    text = re.sub(r'ㅎ', '하', text)
+    text = re.sub(r'ㅠ', '흑', text)
+    text = re.sub(r'ㅜ', '흑', text)
 
     text = text.strip()
 

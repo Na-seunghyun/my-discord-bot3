@@ -930,8 +930,7 @@ async def tts_help(interaction: discord.Interaction):
     )
 
     await interaction.response.send_message(
-        msg,
-        ephemeral=True
+        msg
     )
 
 # ======================================================

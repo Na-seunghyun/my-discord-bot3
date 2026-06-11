@@ -1079,13 +1079,15 @@ async def gamble(interaction: discord.Interaction, 배팅금액: int):
             ephemeral=True
         )
 
+    await interaction.response.defer()
+
     async with gamble_lock:
         data = load_gamble_data()
         account = get_gamble_account(data, interaction.user.id)
         balance = get_gamble_balance(account)
 
         if 배팅금액 > balance:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 f"❌ 잔액이 부족합니다. 현재 잔액: {balance:,}원",
                 ephemeral=True
             )
@@ -1118,7 +1120,7 @@ async def gamble(interaction: discord.Interaction, 배팅금액: int):
         new_balance = get_gamble_balance(account)
         save_gamble_data(data)
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"{result_msg}\n"
         f"🏦 현재 잔액: **{new_balance:,}원**",
         allowed_mentions=discord.AllowedMentions(users=True)
@@ -1128,13 +1130,15 @@ async def gamble(interaction: discord.Interaction, 배팅금액: int):
 @bot.tree.command(name="도박잔액", guild=GUILD_OBJ)
 async def gamble_balance(interaction: discord.Interaction):
 
+    await interaction.response.defer(ephemeral=True)
+
     async with gamble_lock:
         data = load_gamble_data()
         account = get_gamble_account(data, interaction.user.id)
         balance = get_gamble_balance(account)
         save_gamble_data(data)
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"🏦 {interaction.user.mention}님의 도박 잔액\n"
         f"💰 총 잔액: {balance:,}원\n"
         f"🎁 오늘 기본금: {int(account.get('daily_bonus', 0)):,}원\n"
@@ -1146,6 +1150,8 @@ async def gamble_balance(interaction: discord.Interaction):
 
 @bot.tree.command(name="도박명예의전당", guild=GUILD_OBJ)
 async def gamble_hall_of_fame(interaction: discord.Interaction):
+
+    await interaction.response.defer()
 
     async with gamble_lock:
         data = load_gamble_data()
@@ -1169,7 +1175,7 @@ async def gamble_hall_of_fame(interaction: discord.Interaction):
     day_key = get_current_day_key()
 
     if not entries:
-        return await interaction.response.send_message(
+        return await interaction.followup.send(
             f"🏆 **도박 명예의전당 ({day_key})**\n\n아직 기록이 없습니다."
         )
 
@@ -1183,7 +1189,7 @@ async def gamble_hall_of_fame(interaction: discord.Interaction):
             f"(수익금 {profit:,}원, {wins}승 {losses}패)\n"
         )
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         msg,
         allowed_mentions=discord.AllowedMentions(users=True)
     )

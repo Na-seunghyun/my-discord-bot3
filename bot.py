@@ -165,12 +165,13 @@ def get_gamble_account(data: dict, user_id: int) -> dict:
         }
     )
 
-    if "weekly_bonus" in account and "daily_bonus" not in account:
-        account["daily_bonus"] = account.pop("weekly_bonus")
+    if "weekly_bonus" in account:
+        account.pop("weekly_bonus", None)
+        account["daily_bonus"] = GAMBLE_DAILY_ALLOWANCE
 
-    if "week" in account and "day" not in account:
+    if "week" in account:
         account.pop("week", None)
-        account["day"] = day_key
+        account["day"] = ""
 
     if account.get("day") != day_key:
         account["daily_bonus"] = GAMBLE_DAILY_ALLOWANCE

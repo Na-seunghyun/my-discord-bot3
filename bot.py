@@ -8,7 +8,7 @@ import edge_tts
 import uuid
 import re
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Literal
 import emoji
 import traceback
@@ -75,8 +75,9 @@ VOICE_CHANNEL_IDS = [
 ]
 
 GAMBLE_DATA_FILE = "gamble_data.json"
-GAMBLE_WEEKLY_ALLOWANCE = 500
+GAMBLE_DAILY_ALLOWANCE = 500
 GAMBLE_WIN_RATE = 0.45
+KST = timezone(timedelta(hours=9))
 gamble_lock = asyncio.Lock()
 
 GAMBLE_WIN_MESSAGES = [
@@ -118,10 +119,8 @@ async def check_permission(interaction: discord.Interaction) -> bool:
 # ======================================================
 # 🎲 도박 데이터
 # ======================================================
-def get_current_week_key() -> str:
-    now = datetime.now(timezone.utc)
-    year, week, _ = now.isocalendar()
-    return f"{year}-W{week:02d}"
+def get_current_day_key() -> str:
+    return datetime.now(KST).strftime("%Y-%m-%d")
 
 
 def load_gamble_data() -> dict:
@@ -153,25 +152,32 @@ def save_gamble_data(data: dict):
 def get_gamble_account(data: dict, user_id: int) -> dict:
     users = data.setdefault("users", {})
     key = str(user_id)
-    week_key = get_current_week_key()
+    day_key = get_current_day_key()
 
     account = users.setdefault(
         key,
         {
             "profit": 0,
-            "weekly_bonus": GAMBLE_WEEKLY_ALLOWANCE,
-            "week": week_key,
+            "daily_bonus": GAMBLE_DAILY_ALLOWANCE,
+            "day": day_key,
             "wins": 0,
             "losses": 0
         }
     )
 
-    if account.get("week") != week_key:
-        account["weekly_bonus"] = GAMBLE_WEEKLY_ALLOWANCE
-        account["week"] = week_key
+    if "weekly_bonus" in account and "daily_bonus" not in account:
+        account["daily_bonus"] = account.pop("weekly_bonus")
+
+    if "week" in account and "day" not in account:
+        account.pop("week", None)
+        account["day"] = day_key
+
+    if account.get("day") != day_key:
+        account["daily_bonus"] = GAMBLE_DAILY_ALLOWANCE
+        account["day"] = day_key
 
     account.setdefault("profit", 0)
-    account.setdefault("weekly_bonus", GAMBLE_WEEKLY_ALLOWANCE)
+    account.setdefault("daily_bonus", GAMBLE_DAILY_ALLOWANCE)
     account.setdefault("wins", 0)
     account.setdefault("losses", 0)
 
@@ -179,14 +185,14 @@ def get_gamble_account(data: dict, user_id: int) -> dict:
 
 
 def get_gamble_balance(account: dict) -> int:
-    return int(account.get("profit", 0)) + int(account.get("weekly_bonus", 0))
+    return int(account.get("profit", 0)) + int(account.get("daily_bonus", 0))
 
 
 def subtract_gamble_balance(account: dict, amount: int):
-    weekly_bonus = int(account.get("weekly_bonus", 0))
-    from_bonus = min(weekly_bonus, amount)
+    daily_bonus = int(account.get("daily_bonus", 0))
+    from_bonus = min(daily_bonus, amount)
 
-    account["weekly_bonus"] = weekly_bonus - from_bonus
+    account["daily_bonus"] = daily_bonus - from_bonus
     account["profit"] = int(account.get("profit", 0)) - (amount - from_bonus)
 
 
@@ -1131,7 +1137,7 @@ async def gamble_balance(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"🏦 {interaction.user.mention}님의 도박 잔액\n"
         f"💰 총 잔액: {balance:,}원\n"
-        f"🎁 이번 주 기본금: {int(account.get('weekly_bonus', 0)):,}원\n"
+        f"🎁 오늘 기본금: {int(account.get('daily_bonus', 0)):,}원\n"
         f"📈 도박 수익금: {int(account.get('profit', 0)):,}원\n"
         f"🎯 전적: {int(account.get('wins', 0))}승 {int(account.get('losses', 0))}패",
         ephemeral=True
@@ -1160,14 +1166,14 @@ async def gamble_hall_of_fame(interaction: discord.Interaction):
         save_gamble_data(data)
 
     entries.sort(key=lambda item: item[1], reverse=True)
-    week_key = get_current_week_key()
+    day_key = get_current_day_key()
 
     if not entries:
         return await interaction.response.send_message(
-            f"🏆 **도박 명예의전당 ({week_key})**\n\n아직 기록이 없습니다."
+            f"🏆 **도박 명예의전당 ({day_key})**\n\n아직 기록이 없습니다."
         )
 
-    msg = f"🏆 **도박 명예의전당 ({week_key})**\n\n"
+    msg = f"🏆 **도박 명예의전당 ({day_key})**\n\n"
 
     for rank, (user_id, balance, profit, wins, losses) in enumerate(entries[:10], 1):
         member = interaction.guild.get_member(user_id)

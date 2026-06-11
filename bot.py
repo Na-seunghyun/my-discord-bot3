@@ -241,6 +241,19 @@ SAJU_ELEMENT_ADVICE = {
     "水": "정보를 모으고 분위기를 읽는 데 강점이 생기는 날입니다."
 }
 
+SAJU_DAY_MASTER_TRAITS = {
+    "甲": ("큰 나무", "곧게 뻗는 힘이 강하고, 목표가 생기면 꾸준히 밀고 가는 타입입니다."),
+    "乙": ("풀과 꽃", "부드럽게 적응하고 관계 속에서 기회를 찾는 감각이 좋습니다."),
+    "丙": ("태양", "밝게 드러나는 기운이 강하고, 분위기를 살리는 표현력이 있습니다."),
+    "丁": ("촛불", "섬세한 집중력과 감정의 온도가 살아있는 타입입니다."),
+    "戊": ("큰 산", "중심을 잡고 버티는 힘이 있으며, 주변을 안정시키는 편입니다."),
+    "己": ("밭의 흙", "현실감각이 좋고, 작은 것을 쌓아 결과로 만드는 데 강합니다."),
+    "庚": ("단단한 쇠", "결단력과 승부 감각이 있으며, 기준이 분명한 타입입니다."),
+    "辛": ("보석", "디테일과 완성도에 민감하고, 감각적인 판단이 돋보입니다."),
+    "壬": ("큰 물", "생각의 폭이 넓고 흐름을 읽는 능력이 좋은 편입니다."),
+    "癸": ("비와 이슬", "조용히 스며드는 관찰력과 섬세한 이해력이 있습니다.")
+}
+
 
 def parse_birth_date(value: str):
     value = value.strip()
@@ -346,6 +359,110 @@ def build_saju_summary(user_id: int, birth_date, birth_time):
         "그 부분은 무리하기보다 천천히 보완하는 편이 좋습니다.\n"
         f"행운 키워드: **{keywords[0]} / {keywords[1]} / {keywords[2]}**\n\n"
         "※ 재미용 운세입니다. 중요한 결정은 현실 정보와 함께 판단해주세요."
+    )
+
+    return msg
+
+
+def build_saju_reading(user_id: int, birth_date, birth_time):
+    from lunar_python import Solar
+
+    hour, minute = birth_time
+    solar = Solar.fromYmdHms(
+        birth_date.year,
+        birth_date.month,
+        birth_date.day,
+        hour,
+        minute,
+        0
+    )
+
+    lunar = solar.getLunar()
+    eight_char = lunar.getEightChar()
+
+    pillars = [
+        eight_char.getYear(),
+        eight_char.getMonth(),
+        eight_char.getDay(),
+        eight_char.getTime()
+    ]
+
+    wuxing_text = (
+        eight_char.getYearWuXing()
+        + eight_char.getMonthWuXing()
+        + eight_char.getDayWuXing()
+        + eight_char.getTimeWuXing()
+    )
+
+    counts = {element: wuxing_text.count(element) for element in SAJU_ELEMENTS}
+    dominant = max(counts, key=counts.get)
+    weakest = min(counts, key=counts.get)
+
+    day_master = eight_char.getDay()[0]
+    day_element = SAJU_STEM_ELEMENTS.get(day_master, dominant)
+    day_title, day_trait = SAJU_DAY_MASTER_TRAITS.get(
+        day_master,
+        ("일간", "자신만의 흐름을 가지고 상황에 맞춰 움직이는 타입입니다.")
+    )
+
+    seed_text = (
+        f"{user_id}:{get_current_day_key()}:"
+        f"{'-'.join(pillars)}:{wuxing_text}:reading"
+    )
+
+    total_score = get_saju_score(seed_text, "total")
+    money_score = get_saju_score(seed_text, "money")
+    relation_score = get_saju_score(seed_text, "relation")
+    gamble_score = get_saju_score(seed_text, "gamble", 35, 92)
+
+    element_counts = " / ".join(
+        f"{SAJU_ELEMENTS[k]} {v}" for k, v in counts.items()
+    )
+    keywords = SAJU_ELEMENT_KEYWORDS.get(dominant, ("균형", "관찰", "정리"))
+
+    money_note = (
+        "큰 한 방보다 작은 선택을 나눠서 가져가는 편이 안정적입니다."
+        if money_score < 70
+        else "흐름을 잘 타면 작은 이득을 키우기 좋은 날입니다."
+    )
+    relation_note = (
+        "상대의 말을 끝까지 듣는 것이 관계운을 살립니다."
+        if relation_score < 70
+        else "가벼운 대화와 농담이 분위기를 부드럽게 만들 수 있습니다."
+    )
+    gamble_note = (
+        "승부운이 강한 편은 아니니 올인보다 소액으로 분위기만 보는 쪽이 좋습니다."
+        if gamble_score < 65
+        else "승부 감각이 올라오지만, 과감함과 무모함은 한 끗 차이입니다."
+    )
+
+    msg = (
+        "🔮 **사주풀이**\n\n"
+        f"📅 입력 생일: {birth_date.strftime('%Y-%m-%d')} {hour:02d}:{minute:02d}\n"
+        f"🧭 사주팔자: {' '.join(pillars)}\n"
+        f"🌿 오행 분포: {element_counts}\n"
+        f"☀️ 일간: {day_master}({SAJU_ELEMENTS.get(day_element, day_element)}) - {day_title}\n\n"
+        "**1. 기본 성향**\n"
+        f"{day_trait}\n"
+        f"전체 흐름에서는 **{SAJU_ELEMENTS[dominant]}** 기운이 강하게 잡힙니다. "
+        f"{SAJU_ELEMENT_ADVICE.get(dominant, '균형을 살피면 좋은 흐름입니다.')}\n\n"
+        "**2. 부족한 기운**\n"
+        f"상대적으로 부족한 쪽은 **{SAJU_ELEMENTS[weakest]}** 기운입니다. "
+        "이 부분은 억지로 밀어붙이기보다, 주변 도움이나 작은 습관으로 보완하는 편이 좋습니다.\n\n"
+        "**3. 오늘의 흐름**\n"
+        f"총운은 **{total_score}점**입니다. "
+        "오늘은 크게 무리하기보다 흐름을 보면서 선택하면 안정적입니다.\n\n"
+        "**4. 재물운**\n"
+        f"재물운은 **{money_score}점**입니다. {money_note}\n\n"
+        "**5. 관계운**\n"
+        f"관계운은 **{relation_score}점**입니다. {relation_note}\n\n"
+        "**6. 승부운**\n"
+        f"승부운은 **{gamble_score}점**입니다. {gamble_note}\n\n"
+        "**7. 오늘의 키워드**\n"
+        f"행운 키워드: **{keywords[0]} / {keywords[1]} / {keywords[2]}**\n"
+        f"주의 키워드: **{SAJU_ELEMENTS[weakest]} 기운 부족 / 과한 확신 / 급한 선택**\n\n"
+        "※ 오픈소스 만세력 계산을 바탕으로 만든 재미용 풀이입니다. "
+        "중요한 결정은 현실 정보와 함께 판단해주세요."
     )
 
     return msg
@@ -1401,6 +1518,73 @@ async def saju_fortune(
         )
 
     await interaction.followup.send(msg)
+
+
+@bot.tree.command(name="사주풀이", guild=GUILD_OBJ)
+async def saju_reading(
+    interaction: discord.Interaction,
+    생년월일: str,
+    태어난시간: str
+):
+
+    birth_date = parse_birth_date(생년월일)
+    birth_time = parse_birth_time(태어난시간)
+
+    if not birth_date:
+        return await interaction.response.send_message(
+            "❌ 생년월일은 `YYYY-MM-DD` 또는 `YYYYMMDD` 형식으로 입력해주세요.\n"
+            "예: `/사주풀이 2000-01-23 14:30`",
+            ephemeral=True
+        )
+
+    if not birth_time:
+        return await interaction.response.send_message(
+            "❌ 태어난시간은 `HH:MM`, `HHMM`, 또는 `시` 형식으로 입력해주세요.\n"
+            "예: `14:30`, `1430`, `14`",
+            ephemeral=True
+        )
+
+    await interaction.response.defer()
+
+    try:
+        msg = build_saju_reading(
+            interaction.user.id,
+            birth_date,
+            birth_time
+        )
+    except ModuleNotFoundError:
+        return await interaction.followup.send(
+            "❌ 사주 계산 라이브러리가 설치되어 있지 않습니다.\n"
+            "서버에서 아래 명령어를 한 번 실행해주세요.\n"
+            "`pip install lunar_python`",
+            ephemeral=True
+        )
+    except Exception as e:
+        print("사주풀이 오류:", e)
+        traceback.print_exc()
+        return await interaction.followup.send(
+            f"❌ 사주풀이 계산 중 오류가 발생했습니다.\n`{e}`",
+            ephemeral=True
+        )
+
+    if len(msg) <= 1900:
+        await interaction.followup.send(msg)
+        return
+
+    parts = msg.split("\n\n")
+    chunk = ""
+
+    for part in parts:
+        next_chunk = f"{chunk}\n\n{part}" if chunk else part
+
+        if len(next_chunk) > 1900:
+            await interaction.followup.send(chunk)
+            chunk = part
+        else:
+            chunk = next_chunk
+
+    if chunk:
+        await interaction.followup.send(chunk)
 
 
 # ======================================================

@@ -7,6 +7,8 @@ import asyncio
 import edge_tts
 import uuid
 import re
+import json
+from datetime import datetime, timezone
 from typing import Literal
 import emoji
 import traceback
@@ -70,6 +72,26 @@ VOICE_CHANNEL_IDS = [
     1483414016314314888
 ]
 
+GAMBLE_DATA_FILE = "gamble_data.json"
+GAMBLE_WEEKLY_ALLOWANCE = 500
+gamble_lock = asyncio.Lock()
+
+GAMBLE_WIN_MESSAGES = [
+    "🎰 잭팟은 아니지만 손맛은 확실합니다!",
+    "🍀 오늘 운이 살짝 웃어줬습니다.",
+    "💎 판돈이 예쁘게 불어났습니다.",
+    "🔥 분위기 탔습니다. 하지만 다음 판은 모릅니다.",
+    "🪙 동전이 굴러가더니 지갑으로 돌아왔습니다."
+]
+
+GAMBLE_LOSE_MESSAGES = [
+    "🕳️ 판돈이 조용히 사라졌습니다.",
+    "🥲 운이 잠깐 외출했습니다.",
+    "💨 손에 쥐고 있던 돈이 바람이 됐습니다.",
+    "🧊 차갑게 식었습니다. 다음 판은 다를지도요.",
+    "📉 그래프가 잠깐 아래를 보고 있습니다."
+]
+
 
 # ======================================================
 # 🚨 권한 체크
@@ -88,6 +110,81 @@ async def check_permission(interaction: discord.Interaction) -> bool:
     )
 
     return False
+
+
+# ======================================================
+# 🎲 도박 데이터
+# ======================================================
+def get_current_week_key() -> str:
+    now = datetime.now(timezone.utc)
+    year, week, _ = now.isocalendar()
+    return f"{year}-W{week:02d}"
+
+
+def load_gamble_data() -> dict:
+    if not os.path.exists(GAMBLE_DATA_FILE):
+        return {"users": {}}
+
+    try:
+        with open(GAMBLE_DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print("도박 데이터 로드 실패:", e)
+        return {"users": {}}
+
+    if not isinstance(data, dict):
+        return {"users": {}}
+
+    data.setdefault("users", {})
+    return data
+
+
+def save_gamble_data(data: dict):
+    try:
+        with open(GAMBLE_DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("도박 데이터 저장 실패:", e)
+
+
+def get_gamble_account(data: dict, user_id: int) -> dict:
+    users = data.setdefault("users", {})
+    key = str(user_id)
+    week_key = get_current_week_key()
+
+    account = users.setdefault(
+        key,
+        {
+            "profit": 0,
+            "weekly_bonus": GAMBLE_WEEKLY_ALLOWANCE,
+            "week": week_key,
+            "wins": 0,
+            "losses": 0
+        }
+    )
+
+    if account.get("week") != week_key:
+        account["weekly_bonus"] = GAMBLE_WEEKLY_ALLOWANCE
+        account["week"] = week_key
+
+    account.setdefault("profit", 0)
+    account.setdefault("weekly_bonus", GAMBLE_WEEKLY_ALLOWANCE)
+    account.setdefault("wins", 0)
+    account.setdefault("losses", 0)
+
+    return account
+
+
+def get_gamble_balance(account: dict) -> int:
+    return int(account.get("profit", 0)) + int(account.get("weekly_bonus", 0))
+
+
+def subtract_gamble_balance(account: dict, amount: int):
+    weekly_bonus = int(account.get("weekly_bonus", 0))
+    from_bonus = min(weekly_bonus, amount)
+
+    account["weekly_bonus"] = weekly_bonus - from_bonus
+    account["profit"] = int(account.get("profit", 0)) - (amount - from_bonus)
 
 
 # ======================================================
@@ -932,6 +1029,129 @@ async def tts_help(interaction: discord.Interaction):
     await interaction.response.send_message(
         msg
     )
+
+
+# ======================================================
+# 🎲 도박
+# ======================================================
+@bot.tree.command(name="도박", guild=GUILD_OBJ)
+async def gamble(interaction: discord.Interaction, 배팅금액: int):
+
+    if 배팅금액 <= 0:
+        return await interaction.response.send_message(
+            "❌ 배팅금액은 1원 이상이어야 합니다.",
+            ephemeral=True
+        )
+
+    async with gamble_lock:
+        data = load_gamble_data()
+        account = get_gamble_account(data, interaction.user.id)
+        balance = get_gamble_balance(account)
+
+        if 배팅금액 > balance:
+            return await interaction.response.send_message(
+                f"❌ 잔액이 부족합니다. 현재 잔액: {balance:,}원",
+                ephemeral=True
+            )
+
+        win = random.choice([True, False])
+
+        if win:
+            account["profit"] = int(account.get("profit", 0)) + 배팅금액
+            account["wins"] = int(account.get("wins", 0)) + 1
+            flavor = random.choice(GAMBLE_WIN_MESSAGES)
+            result_msg = (
+                f"🎲 **도박 결과: 승리!**\n"
+                f"{flavor}\n\n"
+                f"👤 도전자: {interaction.user.mention}\n"
+                f"💵 배팅금액: {배팅금액:,}원\n"
+                f"💰 획득금액: +{배팅금액:,}원"
+            )
+        else:
+            subtract_gamble_balance(account, 배팅금액)
+            account["losses"] = int(account.get("losses", 0)) + 1
+            flavor = random.choice(GAMBLE_LOSE_MESSAGES)
+            result_msg = (
+                f"🎲 **도박 결과: 실패...**\n"
+                f"{flavor}\n\n"
+                f"👤 도전자: {interaction.user.mention}\n"
+                f"💵 배팅금액: {배팅금액:,}원\n"
+                f"💸 손실금액: -{배팅금액:,}원"
+            )
+
+        new_balance = get_gamble_balance(account)
+        save_gamble_data(data)
+
+    await interaction.response.send_message(
+        f"{result_msg}\n"
+        f"🏦 현재 잔액: **{new_balance:,}원**",
+        allowed_mentions=discord.AllowedMentions(users=True)
+    )
+
+
+@bot.tree.command(name="도박잔액", guild=GUILD_OBJ)
+async def gamble_balance(interaction: discord.Interaction):
+
+    async with gamble_lock:
+        data = load_gamble_data()
+        account = get_gamble_account(data, interaction.user.id)
+        balance = get_gamble_balance(account)
+        save_gamble_data(data)
+
+    await interaction.response.send_message(
+        f"🏦 {interaction.user.mention}님의 도박 잔액\n"
+        f"💰 총 잔액: {balance:,}원\n"
+        f"🎁 이번 주 기본금: {int(account.get('weekly_bonus', 0)):,}원\n"
+        f"📈 도박 수익금: {int(account.get('profit', 0)):,}원\n"
+        f"🎯 전적: {int(account.get('wins', 0))}승 {int(account.get('losses', 0))}패",
+        ephemeral=True
+    )
+
+
+@bot.tree.command(name="도박명예의전당", guild=GUILD_OBJ)
+async def gamble_hall_of_fame(interaction: discord.Interaction):
+
+    async with gamble_lock:
+        data = load_gamble_data()
+
+        entries = []
+        for user_id, account in data.get("users", {}).items():
+            account = get_gamble_account(data, int(user_id))
+            entries.append(
+                (
+                    int(user_id),
+                    get_gamble_balance(account),
+                    int(account.get("profit", 0)),
+                    int(account.get("wins", 0)),
+                    int(account.get("losses", 0))
+                )
+            )
+
+        save_gamble_data(data)
+
+    entries.sort(key=lambda item: item[1], reverse=True)
+    week_key = get_current_week_key()
+
+    if not entries:
+        return await interaction.response.send_message(
+            f"🏆 **도박 명예의전당 ({week_key})**\n\n아직 기록이 없습니다."
+        )
+
+    msg = f"🏆 **도박 명예의전당 ({week_key})**\n\n"
+
+    for rank, (user_id, balance, profit, wins, losses) in enumerate(entries[:10], 1):
+        member = interaction.guild.get_member(user_id)
+        name = member.mention if member else f"`{user_id}`"
+        msg += (
+            f"{rank}. {name} - {balance:,}원 "
+            f"(수익금 {profit:,}원, {wins}승 {losses}패)\n"
+        )
+
+    await interaction.response.send_message(
+        msg,
+        allowed_mentions=discord.AllowedMentions(users=True)
+    )
+
 
 # ======================================================
 # 🎯 닉네임 검사

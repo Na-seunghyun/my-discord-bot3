@@ -8,6 +8,7 @@ import edge_tts
 import uuid
 import re
 import json
+import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Literal
 import emoji
@@ -203,6 +204,151 @@ def subtract_gamble_balance(account: dict, amount: int):
 
     account["daily_bonus"] = daily_bonus - from_bonus
     account["profit"] = int(account.get("profit", 0)) - (amount - from_bonus)
+
+
+# ======================================================
+# 🔮 사주 운세
+# ======================================================
+SAJU_ELEMENTS = {
+    "木": "목",
+    "火": "화",
+    "土": "토",
+    "金": "금",
+    "水": "수"
+}
+
+SAJU_STEM_ELEMENTS = {
+    "甲": "木", "乙": "木",
+    "丙": "火", "丁": "火",
+    "戊": "土", "己": "土",
+    "庚": "金", "辛": "金",
+    "壬": "水", "癸": "水"
+}
+
+SAJU_ELEMENT_KEYWORDS = {
+    "木": ("성장", "새로운 시작", "관계 확장"),
+    "火": ("표현", "열정", "주목받는 흐름"),
+    "土": ("안정", "정리", "꾸준함"),
+    "金": ("판단", "결단", "원칙"),
+    "水": ("생각", "유연함", "정보")
+}
+
+SAJU_ELEMENT_ADVICE = {
+    "木": "새로운 제안이나 대화를 가볍게 열어보기 좋은 흐름입니다.",
+    "火": "표현력이 살아나는 날이라, 생각을 너무 오래 묵히지 않는 편이 좋습니다.",
+    "土": "급하게 움직이기보다 정리하고 확인할수록 운이 안정됩니다.",
+    "金": "판단이 또렷해지는 대신 말이 날카로워질 수 있어 한 박자 쉬면 좋습니다.",
+    "水": "정보를 모으고 분위기를 읽는 데 강점이 생기는 날입니다."
+}
+
+
+def parse_birth_date(value: str):
+    value = value.strip()
+
+    for fmt in ("%Y-%m-%d", "%Y%m%d"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            pass
+
+    return None
+
+
+def parse_birth_time(value: str):
+    value = value.strip()
+
+    for fmt in ("%H:%M", "%H%M"):
+        try:
+            dt = datetime.strptime(value, fmt)
+            return dt.hour, dt.minute
+        except ValueError:
+            pass
+
+    if value.isdigit():
+        hour = int(value)
+        if 0 <= hour <= 23:
+            return hour, 0
+
+    return None
+
+
+def get_saju_score(seed_text: str, label: str, low: int = 45, high: int = 96) -> int:
+    digest = hashlib.sha256(f"{seed_text}:{label}".encode("utf-8")).hexdigest()
+    return low + (int(digest[:8], 16) % (high - low + 1))
+
+
+def build_saju_summary(user_id: int, birth_date, birth_time):
+    from lunar_python import Solar
+
+    hour, minute = birth_time
+    solar = Solar.fromYmdHms(
+        birth_date.year,
+        birth_date.month,
+        birth_date.day,
+        hour,
+        minute,
+        0
+    )
+
+    lunar = solar.getLunar()
+    eight_char = lunar.getEightChar()
+
+    pillars = [
+        eight_char.getYear(),
+        eight_char.getMonth(),
+        eight_char.getDay(),
+        eight_char.getTime()
+    ]
+
+    wuxing_text = (
+        eight_char.getYearWuXing()
+        + eight_char.getMonthWuXing()
+        + eight_char.getDayWuXing()
+        + eight_char.getTimeWuXing()
+    )
+
+    counts = {element: wuxing_text.count(element) for element in SAJU_ELEMENTS}
+    dominant = max(counts, key=counts.get)
+    weakest = min(counts, key=counts.get)
+
+    day_master = eight_char.getDay()[0]
+    day_element = SAJU_STEM_ELEMENTS.get(day_master, dominant)
+
+    seed_text = (
+        f"{user_id}:{get_current_day_key()}:"
+        f"{'-'.join(pillars)}:{wuxing_text}"
+    )
+
+    total_score = get_saju_score(seed_text, "total")
+    money_score = get_saju_score(seed_text, "money")
+    relation_score = get_saju_score(seed_text, "relation")
+    gamble_score = get_saju_score(seed_text, "gamble", 35, 92)
+
+    keywords = SAJU_ELEMENT_KEYWORDS.get(dominant, ("균형", "관찰", "정리"))
+
+    element_counts = " / ".join(
+        f"{SAJU_ELEMENTS[k]} {v}" for k, v in counts.items()
+    )
+
+    msg = (
+        "🔮 **오늘의 사주 운세**\n\n"
+        f"📅 기준일: {get_current_day_key()} (한국시간)\n"
+        f"🧭 사주팔자: {' '.join(pillars)}\n"
+        f"🌿 오행 분포: {element_counts}\n"
+        f"☀️ 일간: {day_master}({SAJU_ELEMENTS.get(day_element, day_element)})\n\n"
+        f"총운: **{total_score}점**\n"
+        f"재물운: **{money_score}점**\n"
+        f"관계운: **{relation_score}점**\n"
+        f"승부운: **{gamble_score}점**\n\n"
+        f"오늘 강한 기운은 **{SAJU_ELEMENTS[dominant]}**입니다.\n"
+        f"{SAJU_ELEMENT_ADVICE.get(dominant, '균형을 살피면 좋은 날입니다.')}\n\n"
+        f"부족한 기운은 **{SAJU_ELEMENTS[weakest]}** 쪽이라, "
+        "그 부분은 무리하기보다 천천히 보완하는 편이 좋습니다.\n"
+        f"행운 키워드: **{keywords[0]} / {keywords[1]} / {keywords[2]}**\n\n"
+        "※ 재미용 운세입니다. 중요한 결정은 현실 정보와 함께 판단해주세요."
+    )
+
+    return msg
 
 
 # ======================================================
@@ -1202,6 +1348,59 @@ async def gamble_hall_of_fame(interaction: discord.Interaction):
         msg,
         allowed_mentions=discord.AllowedMentions(users=True)
     )
+
+
+# ======================================================
+# 🔮 사주운세
+# ======================================================
+@bot.tree.command(name="사주운세", guild=GUILD_OBJ)
+async def saju_fortune(
+    interaction: discord.Interaction,
+    생년월일: str,
+    태어난시간: str
+):
+
+    birth_date = parse_birth_date(생년월일)
+    birth_time = parse_birth_time(태어난시간)
+
+    if not birth_date:
+        return await interaction.response.send_message(
+            "❌ 생년월일은 `YYYY-MM-DD` 또는 `YYYYMMDD` 형식으로 입력해주세요.\n"
+            "예: `/사주운세 2000-01-23 14:30`",
+            ephemeral=True
+        )
+
+    if not birth_time:
+        return await interaction.response.send_message(
+            "❌ 태어난시간은 `HH:MM`, `HHMM`, 또는 `시` 형식으로 입력해주세요.\n"
+            "예: `14:30`, `1430`, `14`",
+            ephemeral=True
+        )
+
+    await interaction.response.defer()
+
+    try:
+        msg = build_saju_summary(
+            interaction.user.id,
+            birth_date,
+            birth_time
+        )
+    except ModuleNotFoundError:
+        return await interaction.followup.send(
+            "❌ 사주 계산 라이브러리가 설치되어 있지 않습니다.\n"
+            "서버에서 아래 명령어를 한 번 실행해주세요.\n"
+            "`pip install lunar_python`",
+            ephemeral=True
+        )
+    except Exception as e:
+        print("사주운세 오류:", e)
+        traceback.print_exc()
+        return await interaction.followup.send(
+            f"❌ 사주운세 계산 중 오류가 발생했습니다.\n`{e}`",
+            ephemeral=True
+        )
+
+    await interaction.followup.send(msg)
 
 
 # ======================================================

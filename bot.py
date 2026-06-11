@@ -42,16 +42,16 @@ TTS_TEXT_CHANNEL_ID = 1513451508597788774
 
 tts_sessions = {}
 
-VOICE_POOL = [
-    "ko-KR-SunHiNeural",
-    "ko-KR-InJoonNeural",
-    "ko-KR-HyunsuMultilingualNeural"
-]
+VOICE_OPTIONS = {
+    "여자1": "ko-KR-SunHiNeural",
+    "남자1": "ko-KR-InJoonNeural",
+    "남자2": "ko-KR-HyunsuMultilingualNeural"
+}
 
 VOICE_NAMES = {
-    "ko-KR-SunHiNeural": "선희",
-    "ko-KR-InJoonNeural": "인준",
-    "ko-KR-HyunsuMultilingualNeural": "현수"
+    "ko-KR-SunHiNeural": "여자1",
+    "ko-KR-InJoonNeural": "남자1",
+    "ko-KR-HyunsuMultilingualNeural": "남자2"
 }
 
 # ======================================================
@@ -597,7 +597,10 @@ async def tts_join(interaction: discord.Interaction):
     )
 
 @bot.tree.command(name="토끼tts등록", guild=GUILD_OBJ)
-async def tts_register(interaction: discord.Interaction):
+async def tts_register(
+    interaction: discord.Interaction,
+    목소리: Literal["여자1", "남자1", "남자2"]
+):
 
     guild_id = interaction.guild.id
 
@@ -609,31 +612,20 @@ async def tts_register(interaction: discord.Interaction):
 
     session = tts_sessions[guild_id]
 
-    if interaction.user.id in session["users"]:
-        voice_name = session["users"][interaction.user.id]
-        return await interaction.response.send_message(
-            f"✅ 이미 등록됨 ({VOICE_NAMES[voice_name]})",
-            ephemeral=True
-        )
-
-    if len(session["users"]) >= 3:
-        return await interaction.response.send_message(
-            "❌ 최대 3명",
-            ephemeral=True
-        )
-
-    used = set(session["users"].values())
-
-    voice_name = next(
-        v for v in VOICE_POOL
-        if v not in used
-    )
+    voice_name = VOICE_OPTIONS[목소리]
+    already_registered = interaction.user.id in session["users"]
 
     session["users"][interaction.user.id] = voice_name
 
-    await interaction.response.send_message(
-        f"🎤 등록 완료: {VOICE_NAMES[voice_name]}"
-    )
+    if already_registered:
+        await interaction.response.send_message(
+            f"🎤 목소리 변경 완료: {VOICE_NAMES[voice_name]}",
+            ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            f"🎤 등록 완료: {VOICE_NAMES[voice_name]}"
+        )
 
 @bot.tree.command(name="토끼tts퇴장", guild=GUILD_OBJ)
 async def tts_leave(interaction: discord.Interaction):
@@ -686,13 +678,87 @@ async def tts_leave(interaction: discord.Interaction):
             "🛑 TTS 세션이 자동 종료되었습니다."
         )
 
-    # 아직 사용자 남아있음
-    available = 3 - remaining
-
     await interaction.response.send_message(
         f"🔇 TTS 등록 해제 완료\n"
-        f"👥 현재 사용중: {remaining}/3\n"
-        f"🎤 남은 등록 가능 인원: {available}명"
+        f"👥 현재 등록자: {remaining}명"
+    )
+
+@bot.tree.command(name="토끼tts상태", guild=GUILD_OBJ)
+async def tts_status(interaction: discord.Interaction):
+
+    session = tts_sessions.get(interaction.guild.id)
+
+    if not session:
+        return await interaction.response.send_message(
+            "❌ 현재 활성화된 TTS 세션이 없습니다.",
+            ephemeral=True
+        )
+
+    vc = session.get("vc")
+    channel = vc.channel if vc and vc.channel else None
+    users = session.get("users", {})
+    queue = session.get("queue")
+
+    msg = "🎧 **토끼 TTS 상태**\n\n"
+    msg += f"📍 음성채널: {channel.mention if channel else '알 수 없음'}\n"
+    msg += f"👥 등록자: {len(users)}명\n"
+    msg += f"🗣️ 대기 중인 문장: {queue.qsize() if queue else 0}개\n"
+
+    if users:
+        msg += "\n**등록자 목록**\n"
+        for user_id, voice_name in users.items():
+            member = interaction.guild.get_member(user_id)
+            name = member.mention if member else f"`{user_id}`"
+            msg += f"• {name}: {VOICE_NAMES.get(voice_name, voice_name)}\n"
+    else:
+        msg += "\n등록된 사용자가 없습니다.\n"
+
+    await interaction.response.send_message(
+        msg,
+        ephemeral=True,
+        allowed_mentions=discord.AllowedMentions(users=True)
+    )
+
+@bot.tree.command(name="토끼tts강제종료", guild=GUILD_OBJ)
+async def tts_force_stop(interaction: discord.Interaction):
+
+    if not await check_permission(interaction):
+        return await interaction.response.send_message(
+            "❌ 권한 없음",
+            ephemeral=True
+        )
+
+    session = tts_sessions.get(interaction.guild.id)
+
+    if not session:
+        return await interaction.response.send_message(
+            "❌ 현재 활성화된 TTS 세션이 없습니다.",
+            ephemeral=True
+        )
+
+    vc = session.get("vc")
+
+    try:
+        if vc and vc.is_playing():
+            vc.stop()
+    except Exception:
+        pass
+
+    try:
+        if vc and vc.is_connected():
+            await vc.disconnect()
+    except Exception as e:
+        print("TTS 강제종료 음성 연결 해제 실패:", e)
+
+    try:
+        session["queue"].put_nowait(None)
+    except Exception:
+        pass
+
+    tts_sessions.pop(interaction.guild.id, None)
+
+    await interaction.response.send_message(
+        "🛑 TTS 세션을 강제 종료했습니다."
     )
     
 @bot.tree.command(
@@ -827,10 +893,11 @@ async def tts_help(interaction: discord.Interaction):
         "👉 TTS 시스템을 시작합니다\n"
         "👉 봇이 음성채널에 입장합니다\n\n"
 
-        "2️⃣ `/토끼tts등록`\n"
-        "👉 최대 3명까지 등록 가능합니다\n"
+        "2️⃣ `/토끼tts등록 목소리`\n"
+        "👉 원하는 목소리를 선택해 등록합니다\n"
         "👉 등록된 사용자만 채팅이 TTS로 읽힙니다\n"
-        "👉 자동으로 목소리가 배정됩니다 (선희 / 인준 / 현수)\n\n"
+        "👉 목소리는 여자1 / 남자1 / 남자2 중 선택할 수 있습니다\n"
+        "👉 이미 등록된 사용자는 같은 명령어로 목소리를 바꿀 수 있습니다\n\n"
 
         "3️⃣ 채팅 사용\n"
         "👉 지정된 텍스트 채널에 메시지를 입력하면 자동 음성 변환됩니다\n"
@@ -841,7 +908,13 @@ async def tts_help(interaction: discord.Interaction):
         "👉 모든 사용자가 나가면 TTS 세션이 종료됩니다\n"
         "👉 마지막 사용자 퇴장 시 봇도 음성채널에서 나갑니다\n\n"
 
-        "5️⃣ `/공지 내용`\n"
+        "5️⃣ `/토끼tts상태`\n"
+        "👉 현재 TTS 채널, 등록자, 대기 문장 수를 확인합니다\n\n"
+
+        "6️⃣ `/토끼tts강제종료`\n"
+        "👉 운영자가 TTS 세션을 즉시 종료합니다\n\n"
+
+        "7️⃣ `/공지 내용`\n"
         "👉 권한이 있는 운영자만 사용 가능합니다\n"
         "👉 사람이 있는 모든 음성채널에 순차적으로 공지를 방송합니다\n"
         "👉 공지 시작 시 현재 TTS 세션은 자동 종료됩니다\n"
@@ -849,7 +922,8 @@ async def tts_help(interaction: discord.Interaction):
 
         "━━━━━━━━━━━━━━━━━━\n"
         "⚠️ 규칙\n"
-        "• 최대 3명까지 동시 사용 가능\n"
+        "• 등록 인원 제한은 없습니다\n"
+        "• 여러 사람이 같은 목소리를 선택해도 됩니다\n"
         "• 채널 이동 시 봇은 따라가지 않습니다\n"
         "• 반드시 입장 → 등록 순서로 사용하세요\n"
         "• 운영자가 `/공지`를 실행하면 현재 TTS 세션은 종료됩니다\n"

@@ -1283,29 +1283,43 @@ class RabbitBotHelpView(discord.ui.View):
     async def features(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             "🐰 **토끼봇 기능소개**\n\n"
-            "🎧 TTS: 채팅을 음성으로 읽어줍니다.\n"
-            "🎲 도박: 매일 지급되는 가상 금액으로 가볍게 즐깁니다.\n"
-            "🔮 사주/운세: 생년월일과 시간으로 재미용 운세를 봅니다.\n"
-            "🎮 팀짜기/소환: 음성채널 인원을 나누거나 이동시킵니다.\n"
+            "🔊 TTS: 음성방별로 동시에 사용할 수 있고, 메인봇과 보조봇이 나누어 읽습니다.\n"
+            "📢 공지: 일반 TTS를 종료하지 않고, 비어 있는 봇이 각 음성방에 들어가 공지합니다.\n"
             "📡 방송 체크: 화면공유가 꺼진 게임방에 안내 방송을 보냅니다.\n"
-            "📋 검사/공지: 운영자를 위한 관리 기능입니다.",
+            "🎲 도박: 매일 기본금 500원으로 가볍게 즐기는 재미 기능입니다.\n"
+            "🔮 사주/운세: 생년월일과 시간으로 간단한 운세와 풀이를 봅니다.\n"
+            "👥 팀짜기/소환/검사: 음성방 운영을 도와주는 관리 기능입니다.",
             ephemeral=True
         )
 
     @discord.ui.button(label="TTS 사용법", style=discord.ButtonStyle.primary)
     async def tts(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
-            "🎧 **TTS 사용법**\n\n"
-            "1. 음성채널에 먼저 접속\n"
-            "2. `/토끼tts등록 목소리` 사용\n"
-            "3. 채팅을 입력하면 봇이 읽어줍니다\n"
-            "4. 종료할 때는 `/토끼tts퇴장`\n\n"
+            "🔊 **TTS 사용법**\n\n"
+            "1. 음성채널에 먼저 접속합니다.\n"
+            "2. `/토끼tts등록 목소리`로 등록합니다.\n"
+            "3. 채팅을 입력하면 봇이 음성으로 읽어줍니다.\n"
+            "4. 종료할 때는 `/토끼tts퇴장`을 사용합니다.\n\n"
             "목소리: 여자1 / 남자1 / 남자2\n"
             "속도 설정: `/토끼tts속도 값`\n"
             "범위: -50 ~ 50\n"
-            "예: `/토끼tts속도 30`, `/토끼tts속도 -20`, `/토끼tts속도 0`\n"
+            "예: `/토끼tts속도 30`, `/토끼tts속도 -20`, `/토끼tts속도 0`\n\n"
+            "여러 음성방에서 동시에 TTS를 켜면 메인봇과 보조봇이 자동으로 나누어 들어갑니다.\n"
             "상태 확인: `/토끼tts상태`\n"
             "운영자 종료: `/토끼tts강제종료`",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="공지/방송", style=discord.ButtonStyle.secondary)
+    async def notice_info(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "📢 **공지/방송 안내**\n\n"
+            "`/공지 내용` - 사람이 있는 음성방에 공지를 방송합니다.\n"
+            "기존 TTS는 강제 종료하지 않고, 비어 있는 보조봇이 우선 공지합니다.\n"
+            "모든 봇이 사용 중이면 메인봇이 하던 말을 끝낸 뒤 공지를 처리합니다.\n\n"
+            "`/방송체크켜기` - 화면공유가 꺼진 음성방을 감지해 안내합니다.\n"
+            "`/방송체크끄기` - 방송 체크를 끕니다.\n"
+            "`/방송체크상태` - 현재 방송 체크 설정을 확인합니다.",
             ephemeral=True
         )
 
@@ -1313,7 +1327,7 @@ class RabbitBotHelpView(discord.ui.View):
     async def gamble_info(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             "🎲 **도박 안내**\n\n"
-            "`/도박 배팅금액` - 가상 금액으로 도박\n"
+            "`/도박 배팅금액` - 가진 금액으로 도박\n"
             "`/도박잔액` - 내 잔액과 전적 확인\n"
             "`/도박명예의전당` - 잔액 랭킹 확인\n\n"
             "매일 한국시간 기준 기본금 500원이 지급됩니다.\n"
@@ -1327,9 +1341,9 @@ class RabbitBotHelpView(discord.ui.View):
         await interaction.response.send_message(
             "🔮 **사주/운세 안내**\n\n"
             "`/사주운세 생년월일 태어난시간`\n"
-            "- 짧은 오늘 운세를 봅니다.\n\n"
+            "- 지금의 간단한 운세를 봅니다.\n\n"
             "`/사주풀이 생년월일 태어난시간`\n"
-            "- 성향, 오행, 재물운, 관계운, 승부운을 자세히 봅니다.\n\n"
+            "- 성향, 오행, 관계운, 일운 등을 자세히 봅니다.\n\n"
             "예시: `/사주풀이 2000-01-23 14:30`\n"
             "개인정보는 저장하지 않고, 실행할 때만 계산합니다.",
             ephemeral=True
@@ -1338,9 +1352,9 @@ class RabbitBotHelpView(discord.ui.View):
     @discord.ui.button(label="후원", style=discord.ButtonStyle.danger)
     async def donate(self, interaction: discord.Interaction, button: discord.ui.Button):
         msg = (
-            "💛 **토끼봇 후원하기**\n\n"
-            "봇 운영과 서버 유지에 도움이 됩니다.\n"
-            "후원은 선택이며, 항상 감사합니다!"
+            "💝 **토끼봇 후원하기**\n\n"
+            "봇 운영과 서버 유지에 큰 도움이 됩니다.\n"
+            "후원은 선택이며, 항상 감사합니다."
         )
 
         if os.path.exists(DONATION_QR_FILE):

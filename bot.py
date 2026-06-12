@@ -718,6 +718,18 @@ async def tts_worker(guild_id: int, channel_id: int):
                 text, voice_name, rate = item
 
             vc = session["vc"]
+            if not vc or not vc.is_connected():
+                client = session.get("client")
+                channel = bot.get_channel(session.get("channel_id"))
+
+                if client is not bot and client:
+                    helper_guild = client.get_guild(guild_id)
+                    channel = helper_guild.get_channel(session.get("channel_id")) if helper_guild else None
+
+                if channel:
+                    vc = await connect_client_to_tts_channel(client or bot, channel)
+                    session["vc"] = vc
+
             filename = None
 
             try:
@@ -1467,6 +1479,15 @@ def find_tts_session_by_channel(guild_id: int, channel_id: int):
     return get_guild_tts_sessions(guild_id).get(channel_id)
 
 
+def remove_user_from_other_tts_sessions(guild_id: int, user_id: int, keep_channel_id: int) -> None:
+    for channel_id, session in list(get_guild_tts_sessions(guild_id).items()):
+        if channel_id == keep_channel_id:
+            continue
+
+        session.get("users", {}).pop(user_id, None)
+        session.setdefault("rates", {}).pop(user_id, None)
+
+
 def remove_tts_session(guild_id: int, channel_id: int) -> None:
     guild_sessions = tts_sessions.get(guild_id)
 
@@ -1651,17 +1672,28 @@ async def tts_register(
     saved_rate = saved_setting["rate"]
     already_registered = interaction.user.id in session["users"]
 
+    remove_user_from_other_tts_sessions(
+        interaction.guild.id,
+        interaction.user.id,
+        session["channel_id"]
+    )
+
     session["users"][interaction.user.id] = voice_name
     session.setdefault("rates", {})[interaction.user.id] = saved_rate
 
+    assigned_client = session.get("client")
+    assigned_bot_name = assigned_client.user.name if assigned_client and assigned_client.user else "알 수 없음"
+
     if already_registered:
         await interaction.response.send_message(
-            f"🎤 목소리 변경 완료: {VOICE_NAMES[voice_name]}",
+            f"🎎 목소리 변경 완료: {VOICE_NAMES[voice_name]}\n"
+            f"🤖 담당 봇: {assigned_bot_name}",
             ephemeral=True
         )
     else:
         await interaction.response.send_message(
-            f"🎤 등록 완료: {VOICE_NAMES[voice_name]}"
+            f"🎎 등록 완료: {VOICE_NAMES[voice_name]}\n"
+            f"🤖 담당 봇: {assigned_bot_name}"
         )
 
 
@@ -2315,6 +2347,12 @@ async def on_message(message):
     rate = session.setdefault("rates", {}).get(message.author.id, "+0%")
 
     await session["queue"].put((text, voice_name, rate))
+    assigned_client = session.get("client")
+    assigned_bot_name = assigned_client.user.name if assigned_client and assigned_client.user else "알 수 없음"
+    print(
+        f"[TTS] 큐 추가: {message.author.display_name} -> "
+        f"{assigned_bot_name} / 채널 {session.get('channel_id')} / {text[:40]}"
+    )
 
     try:
         await message.delete()

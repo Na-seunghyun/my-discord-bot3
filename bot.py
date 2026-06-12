@@ -695,9 +695,9 @@ async def generate_tts(
         await communicate.save(filename)
 
 
-async def tts_worker(guild_id: int):
+async def tts_worker(guild_id: int, channel_id: int):
 
-    session = tts_sessions[guild_id]
+    session = tts_sessions[guild_id][channel_id]
     queue = session["queue"]
     session["tts_busy"] = False
 
@@ -962,8 +962,13 @@ async def send_stream_alert(channel: discord.VoiceChannel):
         if await send_stream_alert_with_helper(channel):
             return
 
-        session = tts_sessions.get(guild.id)
-        vc = session.get("vc") if session else None
+        session = None
+        for item in tts_sessions.get(guild.id, {}).values():
+            if item.get("client") is bot:
+                session = item
+                break
+
+        vc = get_voice_client_for_guild(bot, guild.id)
         original_channel = vc.channel if vc and vc.is_connected() else None
         temporary_connection = False
 
@@ -1027,17 +1032,13 @@ async def stream_check_loop():
 async def shutdown_all_tts(guild):
 
     guild_id = guild.id
+    guild_sessions = list(tts_sessions.get(guild_id, {}).values())
 
-    session = tts_sessions.get(guild_id)
-
-    if not session:
+    if not guild_sessions:
         return
 
     try:
-
-        channel = guild.get_channel(
-            TTS_TEXT_CHANNEL_ID
-        )
+        channel = guild.get_channel(TTS_TEXT_CHANNEL_ID)
 
         if channel:
             await channel.send(
@@ -1048,28 +1049,10 @@ async def shutdown_all_tts(guild):
     except Exception as e:
         print("공지 안내 실패:", e)
 
-    try:
+    for session in guild_sessions:
+        await close_tts_session(guild_id, session)
 
-        vc = session["vc"]
 
-        if vc.is_playing():
-            vc.stop()
-
-        await vc.disconnect()
-
-    except Exception as e:
-        print("음성 연결 종료 실패:", e)
-
-    try:
-        session["queue"].put_nowait(None)
-    except:
-        pass
-
-    tts_sessions.pop(guild_id, None)
-
-# ======================================================
-# 🎮 팀 이동 (핵심 수정 완료)
-# ======================================================
 class MoveTeamsView(discord.ui.View):
     def __init__(self, teams):
         super().__init__(timeout=300)
@@ -1375,9 +1358,101 @@ async def summon_channel(interaction: discord.Interaction):
         ephemeral=True
     )
 
+
+def get_guild_tts_sessions(guild_id: int) -> dict:
+    return tts_sessions.setdefault(guild_id, {})
+
+
+def find_tts_session_by_user(guild_id: int, user_id: int):
+    for session in get_guild_tts_sessions(guild_id).values():
+        if user_id in session.get("users", {}):
+            return session
+
+    return None
+
+
+def find_tts_session_by_channel(guild_id: int, channel_id: int):
+    return get_guild_tts_sessions(guild_id).get(channel_id)
+
+
+def remove_tts_session(guild_id: int, channel_id: int) -> None:
+    guild_sessions = tts_sessions.get(guild_id)
+
+    if not guild_sessions:
+        return
+
+    guild_sessions.pop(channel_id, None)
+
+    if not guild_sessions:
+        tts_sessions.pop(guild_id, None)
+
+
+async def close_tts_session(guild_id: int, session) -> None:
+    vc = session.get("vc")
+    client = session.get("client")
+    channel_id = session.get("channel_id")
+
+    try:
+        if vc and vc.is_playing():
+            vc.stop()
+    except Exception:
+        pass
+
+    try:
+        if vc and vc.is_connected():
+            await vc.disconnect()
+    except Exception as e:
+        print("TTS 음성 연결 해제 실패:", e)
+
+    try:
+        session["queue"].put_nowait(None)
+    except Exception:
+        pass
+
+    if client is not bot:
+        helper_bot_busy[id(client)] = False
+
+    remove_tts_session(guild_id, channel_id)
+
+
+async def get_available_tts_client(guild_id: int):
+    main_vc = get_voice_client_for_guild(bot, guild_id)
+
+    if not is_voice_client_playing(main_vc):
+        if main_vc is None or not main_vc.is_connected():
+            return bot
+
+    return await get_available_helper_bot(guild_id)
+
+
+async def connect_client_to_tts_channel(client, channel: discord.VoiceChannel):
+    if client is bot:
+        vc = get_voice_client_for_guild(bot, channel.guild.id)
+
+        if vc and vc.is_connected():
+            if vc.channel.id != channel.id:
+                await vc.move_to(channel)
+            return vc
+
+        vc = await channel.connect(self_deaf=True)
+
+        try:
+            await channel.guild.change_voice_state(
+                channel=channel,
+                self_deaf=True
+            )
+        except Exception as e:
+            print("Self Deaf 설정 실패:", e)
+
+        return vc
+
+    return await connect_helper_to_channel(client, channel)
+
+
 async def ensure_tts_session(guild: discord.Guild, channel: discord.VoiceChannel):
 
-    session = tts_sessions.get(guild.id)
+    guild_sessions = get_guild_tts_sessions(guild.id)
+    session = guild_sessions.get(channel.id)
 
     if session:
         vc = session.get("vc")
@@ -1391,34 +1466,44 @@ async def ensure_tts_session(guild: discord.Guild, channel: discord.VoiceChannel
             except:
                 pass
 
-            tts_sessions.pop(guild.id, None)
+            remove_tts_session(guild.id, channel.id)
 
     # 세션 생성
-    if guild.id not in tts_sessions:
+    if channel.id not in get_guild_tts_sessions(guild.id):
 
-        vc = await channel.connect()
+        client = await get_available_tts_client(guild.id)
 
-        # 🎧 헤드폰 끄기 (Self Deaf)
+        if client is None:
+            return None
+
+        if client is not bot:
+            helper_bot_busy[id(client)] = True
+
         try:
-            await guild.change_voice_state(
-                channel=channel,
-                self_deaf=True
-            )
-        except Exception as e:
-            print("Self Deaf 설정 실패:", e)
+            vc = await connect_client_to_tts_channel(client, channel)
+        except Exception:
+            if client is not bot:
+                helper_bot_busy[id(client)] = False
+            raise
 
-        tts_sessions[guild.id] = {
+        if vc is None:
+            if client is not bot:
+                helper_bot_busy[id(client)] = False
+            return None
+
+        get_guild_tts_sessions(guild.id)[channel.id] = {
+            "client": client,
             "vc": vc,
             "channel_id": channel.id,
             "users": {},
             "rates": {},
             "queue": asyncio.Queue(),
             "task": asyncio.create_task(
-                tts_worker(guild.id)
+                tts_worker(guild.id, channel.id)
             )
         }
 
-    return tts_sessions[guild.id]
+    return get_guild_tts_sessions(guild.id)[channel.id]
 
 
 @bot.tree.command(name="토끼tts입장", guild=GUILD_OBJ)
@@ -1430,10 +1515,16 @@ async def tts_join(interaction: discord.Interaction):
             ephemeral=True
         )
 
-    await ensure_tts_session(
+    session = await ensure_tts_session(
         interaction.guild,
         interaction.user.voice.channel
     )
+
+    if session is None:
+        return await interaction.response.send_message(
+            "❌ 지금 사용할 수 있는 TTS 봇이 없습니다. 잠시 후 다시 시도해주세요.",
+            ephemeral=True
+        )
 
     await interaction.response.send_message(
         "🎧 TTS 세션 활성화됨\n"
@@ -1456,6 +1547,12 @@ async def tts_register(
         interaction.guild,
         interaction.user.voice.channel
     )
+
+    if session is None:
+        return await interaction.response.send_message(
+            "❌ 지금 사용할 수 있는 TTS 봇이 없습니다. 잠시 후 다시 시도해주세요.",
+            ephemeral=True
+        )
 
     voice_name = VOICE_OPTIONS[목소리]
     saved_setting = get_saved_tts_setting(interaction.user.id)
@@ -1486,7 +1583,7 @@ async def tts_rate(interaction: discord.Interaction, 속도: int):
             ephemeral=True
         )
 
-    session = tts_sessions.get(interaction.guild.id)
+    session = find_tts_session_by_user(interaction.guild.id, interaction.user.id)
 
     if not session or interaction.user.id not in session["users"]:
         return await interaction.response.send_message(
@@ -1508,98 +1605,80 @@ async def tts_rate(interaction: discord.Interaction, 속도: int):
 async def tts_leave(interaction: discord.Interaction):
 
     guild_id = interaction.guild.id
-
-    session = tts_sessions.get(guild_id)
+    user_id = interaction.user.id
+    session = find_tts_session_by_user(guild_id, user_id)
 
     if not session:
         return await interaction.response.send_message(
-            "❌ TTS 세션이 없습니다. /토끼tts등록 목소리로 먼저 시작해주세요",
+            "❌ TTS 세션이 없습니다. 먼저 `/토끼tts등록 목소리`로 시작해주세요.",
             ephemeral=True
         )
 
-    user_id = interaction.user.id
-
-    # 등록 안된 사람
     if user_id not in session["users"]:
         return await interaction.response.send_message(
-            "❌ 등록된 사용자가 아닙니다",
+            "❌ 등록된 사용자가 아닙니다.",
             ephemeral=True
         )
 
-    # 유저 제거
     session["users"].pop(user_id, None)
     session.setdefault("rates", {}).pop(user_id, None)
 
     remaining = len(session["users"])
 
-    # 마지막 사용자 → 세션 종료
     if remaining == 0:
-
-        vc = session.get("vc")
-
-        try:
-            if vc and vc.is_connected():
-                await vc.disconnect()
-        except Exception:
-            pass
-
-        # worker 종료 신호
-        try:
-            session["queue"].put_nowait(None)
-        except Exception:
-            pass
-
-        tts_sessions.pop(guild_id, None)
+        await close_tts_session(guild_id, session)
 
         return await interaction.response.send_message(
-            "🔇 마지막 사용자가 퇴장했습니다.\n"
-            "🛑 TTS 세션이 자동 종료되었습니다."
+            "👋 마지막 사용자가 나가서 이 음성방 TTS 세션을 종료했습니다."
         )
 
     await interaction.response.send_message(
-        f"🔇 TTS 등록 해제 완료\n"
+        f"👋 TTS 등록 해제 완료\n"
         f"👥 현재 등록자: {remaining}명"
     )
+
 
 @bot.tree.command(name="토끼tts상태", guild=GUILD_OBJ)
 async def tts_status(interaction: discord.Interaction):
 
-    session = tts_sessions.get(interaction.guild.id)
+    guild_sessions = tts_sessions.get(interaction.guild.id, {})
 
-    if not session:
+    if not guild_sessions:
         return await interaction.response.send_message(
             "❌ 현재 활성화된 TTS 세션이 없습니다.",
             ephemeral=True
         )
 
-    vc = session.get("vc")
-    channel = vc.channel if vc and vc.channel else None
-    users = session.get("users", {})
-    rates = session.setdefault("rates", {})
-    queue = session.get("queue")
-
     msg = "🎧 **토끼 TTS 상태**\n\n"
-    msg += f"📍 음성채널: {channel.mention if channel else '알 수 없음'}\n"
-    msg += f"👥 등록자: {len(users)}명\n"
-    msg += f"🗣️ 대기 중인 문장: {queue.qsize() if queue else 0}개\n"
+    msg += f"활성 TTS 방: {len(guild_sessions)}개\n"
 
-    if users:
-        msg += "\n**등록자 목록**\n"
+    for session in guild_sessions.values():
+        vc = session.get("vc")
+        channel = vc.channel if vc and vc.channel else None
+        users = session.get("users", {})
+        rates = session.setdefault("rates", {})
+        queue = session.get("queue")
+        client = session.get("client")
+        bot_name = client.user.name if client and client.user else "알 수 없음"
+
+        msg += "\n"
+        msg += f"📍 {channel.mention if channel else '채널 없음'} / 담당: {bot_name}\n"
+        msg += f"👥 등록자: {len(users)}명 / 대기 문장: {queue.qsize() if queue else 0}개\n"
+
         for user_id, voice_name in users.items():
             member = interaction.guild.get_member(user_id)
             name = member.mention if member else f"`{user_id}`"
             msg += (
-                f"• {name}: {VOICE_NAMES.get(voice_name, voice_name)} "
+                f"- {name}: {VOICE_NAMES.get(voice_name, voice_name)} "
                 f"/ 속도 {rates.get(user_id, '+0%')}\n"
             )
-    else:
-        msg += "\n등록된 사용자가 없습니다.\n"
 
     await interaction.response.send_message(
         msg,
         ephemeral=True,
         allowed_mentions=discord.AllowedMentions(users=True)
     )
+
 
 @bot.tree.command(name="토끼tts강제종료", guild=GUILD_OBJ)
 async def tts_force_stop(interaction: discord.Interaction):
@@ -1610,37 +1689,19 @@ async def tts_force_stop(interaction: discord.Interaction):
             ephemeral=True
         )
 
-    session = tts_sessions.get(interaction.guild.id)
+    guild_sessions = list(tts_sessions.get(interaction.guild.id, {}).values())
 
-    if not session:
+    if not guild_sessions:
         return await interaction.response.send_message(
             "❌ 현재 활성화된 TTS 세션이 없습니다.",
             ephemeral=True
         )
 
-    vc = session.get("vc")
-
-    try:
-        if vc and vc.is_playing():
-            vc.stop()
-    except Exception:
-        pass
-
-    try:
-        if vc and vc.is_connected():
-            await vc.disconnect()
-    except Exception as e:
-        print("TTS 강제종료 음성 연결 해제 실패:", e)
-
-    try:
-        session["queue"].put_nowait(None)
-    except Exception:
-        pass
-
-    tts_sessions.pop(interaction.guild.id, None)
+    for session in guild_sessions:
+        await close_tts_session(interaction.guild.id, session)
 
     await interaction.response.send_message(
-        "🛑 TTS 세션을 강제 종료했습니다."
+        "🛑 모든 TTS 세션을 강제 종료했습니다."
     )
 
 
@@ -2161,21 +2222,26 @@ async def on_message(message):
 
     if announcement_running:
         return
-        
-    session = tts_sessions.get(message.guild.id)
-    if not session:
+
+    guild_sessions = tts_sessions.get(message.guild.id, {})
+    if not guild_sessions:
         return
 
-    vc = session.get("vc")
-    if not vc or not vc.channel:
-        return
+    session = None
 
-    # ==================================================
-    # 🎯 채널 필터 (텍스트 OR 음성채널 기준)
-    # ==================================================
+    if message.author.voice and message.author.voice.channel:
+        session = find_tts_session_by_channel(
+            message.guild.id,
+            message.author.voice.channel.id
+        )
+
+    if session is None and message.channel.id == TTS_TEXT_CHANNEL_ID:
+        session = find_tts_session_by_user(message.guild.id, message.author.id)
+
+    if session is None:
+        return
 
     is_text_channel = (message.channel.id == TTS_TEXT_CHANNEL_ID)
-
     is_voice_channel = False
 
     if message.author.voice and message.author.voice.channel:
@@ -2186,9 +2252,6 @@ async def on_message(message):
     if not (is_text_channel or is_voice_channel):
         return
 
-    # ==================================================
-    # 🚫 등록 유저 필터
-    # ==================================================
     if message.author.id not in session["users"]:
         return
 
@@ -2206,78 +2269,47 @@ async def on_message(message):
         await message.delete()
     except:
         pass
+
+
 # ======================================================
 # 🎤 등록 사용자 자동 해제
 # ======================================================
 @bot.event
 async def on_voice_state_update(member, before, after):
 
-    session = tts_sessions.get(member.guild.id)
+    guild_sessions = list(tts_sessions.get(member.guild.id, {}).values())
 
-    if not session:
+    if not guild_sessions:
         return
 
-    vc = session.get("vc")
+    for session in guild_sessions:
+        if member.id not in session.get("users", {}):
+            continue
 
-    if not vc or not vc.channel:
-        return
+        session_channel_id = session.get("channel_id")
+        before_channel_id = before.channel.id if before.channel else None
+        after_channel_id = after.channel.id if after.channel else None
 
-    # 등록자가 아니면 무시
-    if member.id not in session["users"]:
-        return
-
-    session_channel_id = session.get("channel_id")
-
-    before_channel_id = before.channel.id if before.channel else None
-    after_channel_id = after.channel.id if after.channel else None
-
-    # TTS 세션 채널을 떠난 경우
-    # 방송 안내로 봇이 잠시 다른 채널에 있어도 원래 세션 채널 기준으로 감지
-    if before_channel_id == session_channel_id and after_channel_id != session_channel_id:
+        if before_channel_id != session_channel_id or after_channel_id == session_channel_id:
+            continue
 
         session["users"].pop(member.id, None)
         session.setdefault("rates", {}).pop(member.id, None)
 
-        print(
-            f"[TTS] 자동 등록 해제: "
-            f"{member.display_name} ({member.id})"
-        )
+        print(f"[TTS] 자동 등록 해제: {member.display_name} ({member.id})")
 
         remaining = len(session["users"])
+        print(f"[TTS] 남은 등록자: {remaining}명")
 
-        print(
-            f"[TTS] 남은 등록자: {remaining}명"
-        )
-
-        # 등록자 전부 사라짐
         if remaining == 0:
+            print(f"[TTS] 등록자 없음, 세션 종료 시작 (Guild: {member.guild.name})")
+            await close_tts_session(member.guild.id, session)
+            print(f"[TTS] 세션 제거 완료 (Guild: {member.guild.name})")
 
-            print(
-                f"[TTS] 등록자 없음 → 세션 종료 시작 "
-                f"(Guild: {member.guild.name})"
-            )
+        break
 
-            try:
-                session["queue"].put_nowait(None)
-                print("[TTS] Worker 종료 신호 전송")
-            except Exception as e:
-                print(f"[TTS] Queue 종료 신호 실패: {e}")
-
-            try:
-                await vc.disconnect()
-                print("[TTS] 음성채널 연결 해제")
-            except Exception as e:
-                print(f"[TTS] 음성채널 해제 실패: {e}")
-
-            tts_sessions.pop(member.guild.id, None)
-
-            print(
-                f"[TTS] 세션 삭제 완료 "
-                f"(Guild: {member.guild.name})"
-            )
-    
 # ======================================================
-# 🤖 시작
+# 🚀 시작
 # ======================================================
 @bot.event
 async def on_ready():

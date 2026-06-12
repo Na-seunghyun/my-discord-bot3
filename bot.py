@@ -912,6 +912,84 @@ async def send_stream_alert_with_helper(channel: discord.VoiceChannel) -> bool:
         helper_bot_busy[id(helper)] = False
 
 
+def get_tts_session_for_client(guild_id: int, client):
+    for session in tts_sessions.get(guild_id, {}).values():
+        if session.get("client") is client:
+            return session
+
+    return None
+
+
+async def play_announcement_with_available_bot(channel: discord.VoiceChannel, text: str) -> bool:
+    guild = channel.guild
+    helper = await get_available_helper_bot(guild.id)
+
+    if helper is not None:
+        helper_bot_busy[id(helper)] = True
+        vc = None
+
+        try:
+            vc = await connect_helper_to_channel(helper, channel)
+
+            if vc is None:
+                return False
+
+            await play_announcement(vc, text)
+
+            try:
+                if vc.is_connected():
+                    await vc.disconnect()
+            except Exception as e:
+                print("보조봇 공지 퇴장 실패:", e)
+
+            return True
+
+        except Exception as e:
+            print("보조봇 공지 실패:", e)
+            traceback.print_exc()
+            return False
+
+        finally:
+            helper_bot_busy[id(helper)] = False
+
+    main_session = get_tts_session_for_client(guild.id, bot)
+    vc = get_voice_client_for_guild(bot, guild.id)
+    original_channel = vc.channel if vc and vc.is_connected() else None
+    temporary_connection = False
+
+    try:
+        if vc and vc.is_connected():
+            await wait_until_tts_idle(vc, main_session)
+
+            if vc.channel.id != channel.id:
+                await vc.move_to(channel)
+        else:
+            vc = await channel.connect(self_deaf=True)
+            temporary_connection = True
+
+            try:
+                await guild.change_voice_state(
+                    channel=channel,
+                    self_deaf=True
+                )
+            except Exception as e:
+                print("공지 Self Deaf 설정 실패:", e)
+
+        await play_announcement(vc, text)
+
+        if temporary_connection:
+            await vc.disconnect()
+        elif original_channel and vc.is_connected() and original_channel.id != channel.id:
+            await vc.move_to(original_channel)
+
+        return True
+
+    except Exception as e:
+        print("메인봇 공지 실패:", e)
+        traceback.print_exc()
+        return False
+
+
 async def wait_until_tts_idle(vc, session=None):
     while True:
         is_voice_playing = (
@@ -1768,14 +1846,12 @@ async def announce(
 
     global announcement_running
 
-    # 권한 확인
     if not await check_permission(interaction):
         return await interaction.response.send_message(
             "❌ 권한 없음",
             ephemeral=True
         )
 
-    # 이미 공지 진행중
     if announcement_running:
         return await interaction.response.send_message(
             "❌ 이미 공지 방송이 진행중입니다.",
@@ -1783,21 +1859,12 @@ async def announce(
         )
 
     await interaction.response.defer()
-
     announcement_running = True
 
     try:
-
-        # 기존 TTS 종료
-        await shutdown_all_tts(
-            interaction.guild
-        )
-
-        # 사람이 있는 음성채널 찾기
         targets = []
 
         for vc in interaction.guild.voice_channels:
-
             humans = [
                 m for m in vc.members
                 if not m.bot
@@ -1806,51 +1873,24 @@ async def announce(
             if humans:
                 targets.append(vc)
 
-        # 공지 시작 안내
         await interaction.followup.send(
             f"📢 공지 방송 시작\n"
-            f"🎧 대상 채널: {len(targets)}개"
+            f"🎧 대상 채널: {len(targets)}개\n"
+            "현재 TTS는 종료하지 않고, 사용 가능한 봇이 순서대로 공지합니다."
         )
 
         count = 0
 
         for vc in targets:
+            ok = await play_announcement_with_available_bot(vc, 내용)
 
-            try:
-
-                voice_client = await vc.connect()
-
-                # 🎧 헤드폰 끄기 (Self Deaf)
-                try:
-                    await interaction.guild.change_voice_state(
-                        channel=vc,
-                        self_deaf=True
-                    )
-                except Exception as e:
-                    print(
-                        "Self Deaf 설정 실패:",
-                        e
-                    )
-
-                await play_announcement(
-                    voice_client,
-                    내용
-                )
-
-                await voice_client.disconnect()
-
+            if ok:
                 count += 1
+            else:
+                print(f"공지 실패 {vc.name}")
 
-                await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
 
-            except Exception as e:
-
-                print(
-                    f"공지 실패 {vc.name}",
-                    e
-                )
-
-        # 완료 메시지
         await interaction.followup.send(
             f"✅ 공지 완료\n"
             f"📢 방송 채널 수: {count}"
@@ -1863,19 +1903,16 @@ async def announce(
         )
 
     except Exception as e:
-
-        print(
-            "공지 오류:",
-            e
-        )
+        print("공지 오류:", e)
+        traceback.print_exc()
 
         await interaction.followup.send(
             f"❌ 공지 중 오류 발생\n{e}"
         )
 
     finally:
-
         announcement_running = False
+
 
 @bot.tree.command(name="토끼봇도움말", guild=GUILD_OBJ)
 async def rabbit_bot_help(interaction: discord.Interaction):

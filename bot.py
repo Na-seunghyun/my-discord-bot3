@@ -17,12 +17,46 @@ import traceback
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
+HELPER_BOT_TOKENS = [
+    token
+    for token in [
+        os.getenv("HELPER_BOT_TOKEN_1"),
+        os.getenv("HELPER_BOT_TOKEN_2"),
+        os.getenv("HELPER_BOT_TOKEN_3"),
+    ]
+    if token
+]
 
 GUILD_ID = 1309433603331198977
 GUILD_OBJ = discord.Object(id=GUILD_ID)
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+helper_intents = discord.Intents.default()
+helper_intents.guilds = True
+helper_intents.voice_states = True
+helper_bots = []
+helper_bot_busy = {}
+
+
+def create_helper_bot(index: int) -> commands.Bot:
+    helper = commands.Bot(
+        command_prefix=f"!tokki-helper-{index}-",
+        intents=helper_intents
+    )
+
+    @helper.event
+    async def on_ready():
+        print(f"[Helper {index}] Logged in as {helper.user}")
+
+    return helper
+
+
+for helper_index in range(len(HELPER_BOT_TOKENS)):
+    helper = create_helper_bot(helper_index + 1)
+    helper_bots.append(helper)
+    helper_bot_busy[id(helper)] = False
 
 # ======================================================
 # 🔥 권한 역할
@@ -782,6 +816,102 @@ async def play_stream_alert(vc):
             pass
 
 
+def get_voice_client_for_guild(client, guild_id: int):
+    for vc in client.voice_clients:
+        if vc.guild and vc.guild.id == guild_id:
+            return vc
+
+    return None
+
+
+def is_voice_client_playing(vc) -> bool:
+    return bool(
+        vc
+        and vc.is_connected()
+        and (vc.is_playing() or vc.is_paused())
+    )
+
+
+async def get_available_helper_bot(guild_id: int):
+    for helper in helper_bots:
+        if helper_bot_busy.get(id(helper), False):
+            continue
+
+        if not helper.is_ready():
+            continue
+
+        helper_guild = helper.get_guild(guild_id)
+        if helper_guild is None:
+            continue
+
+        vc = get_voice_client_for_guild(helper, guild_id)
+        if is_voice_client_playing(vc):
+            continue
+
+        return helper
+
+    return None
+
+
+async def connect_helper_to_channel(helper, channel: discord.VoiceChannel):
+    helper_channel = helper.get_channel(channel.id)
+
+    if helper_channel is None:
+        helper_guild = helper.get_guild(channel.guild.id)
+        if helper_guild:
+            helper_channel = helper_guild.get_channel(channel.id)
+
+    if helper_channel is None:
+        return None
+
+    vc = get_voice_client_for_guild(helper, channel.guild.id)
+
+    if vc and vc.is_connected():
+        if vc.channel.id != channel.id:
+            await vc.move_to(helper_channel)
+        return vc
+
+    return await helper_channel.connect(self_deaf=True)
+
+
+async def send_stream_alert_with_helper(channel: discord.VoiceChannel) -> bool:
+    helper = await get_available_helper_bot(channel.guild.id)
+
+    if helper is None:
+        return False
+
+    helper_bot_busy[id(helper)] = True
+    vc = None
+
+    try:
+        vc = await connect_helper_to_channel(helper, channel)
+
+        if vc is None:
+            return False
+
+        await play_stream_alert(vc)
+        stream_alert_cooldowns[channel.id] = datetime.now(timezone.utc).timestamp()
+
+        try:
+            if vc.is_connected():
+                await vc.disconnect()
+        except Exception as e:
+            print("보조봇 방송 안내 퇴장 실패:", e)
+
+        helper_name = helper.user.name if helper.user else "helper"
+        print(f"[방송 안내] {helper_name} 보조봇으로 안내 완료: {channel.name}")
+
+        return True
+
+    except Exception as e:
+        print("보조봇 방송 안내 실패:", e)
+        traceback.print_exc()
+        return False
+
+    finally:
+        helper_bot_busy[id(helper)] = False
+
+
 async def wait_until_tts_idle(vc, session=None):
     while True:
         is_voice_playing = (
@@ -828,6 +958,10 @@ async def send_stream_alert(channel: discord.VoiceChannel):
 
     try:
         guild = channel.guild
+
+        if await send_stream_alert_with_helper(channel):
+            return
+
         session = tts_sessions.get(guild.id)
         vc = session.get("vc") if session else None
         original_channel = vc.channel if vc and vc.is_connected() else None
@@ -2163,4 +2297,25 @@ async def on_ready():
 # ======================================================
 # 🚀 실행
 # ======================================================
-bot.run(TOKEN)
+async def start_bots():
+    if not TOKEN:
+        raise RuntimeError("DISCORD_TOKEN이 .env에 설정되어 있지 않습니다.")
+
+    tasks = [
+        asyncio.create_task(bot.start(TOKEN))
+    ]
+
+    for helper, token in zip(helper_bots, HELPER_BOT_TOKENS):
+        tasks.append(
+            asyncio.create_task(helper.start(token))
+        )
+
+    if HELPER_BOT_TOKENS:
+        print(f"보조봇 {len(HELPER_BOT_TOKENS)}개 실행 준비 완료")
+    else:
+        print("보조봇 토큰이 없어 메인 봇만 실행합니다.")
+
+    await asyncio.gather(*tasks)
+
+
+asyncio.run(start_bots())

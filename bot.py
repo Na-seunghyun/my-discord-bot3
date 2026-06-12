@@ -665,6 +665,7 @@ async def tts_worker(guild_id: int):
 
     session = tts_sessions[guild_id]
     queue = session["queue"]
+    session["tts_busy"] = False
 
     while True:
 
@@ -673,6 +674,8 @@ async def tts_worker(guild_id: int):
         try:
             if item is None:
                 break
+
+            session["tts_busy"] = True
 
             if len(item) == 2:
                 text, voice_name = item
@@ -712,6 +715,7 @@ async def tts_worker(guild_id: int):
                         pass
 
         finally:
+            session["tts_busy"] = False
             queue.task_done()
 
 
@@ -778,6 +782,21 @@ async def play_stream_alert(vc):
             pass
 
 
+async def wait_until_tts_idle(vc, session=None):
+    while True:
+        is_voice_playing = (
+            vc
+            and vc.is_connected()
+            and (vc.is_playing() or vc.is_paused())
+        )
+        is_tts_working = bool(session and session.get("tts_busy"))
+
+        if not is_voice_playing and not is_tts_working:
+            return
+
+        await asyncio.sleep(0.2)
+
+
 def should_send_stream_alert(channel: discord.VoiceChannel) -> bool:
     if channel.id in STREAM_CHECK_EXCLUDED_CHANNEL_IDS:
         return False
@@ -815,11 +834,7 @@ async def send_stream_alert(channel: discord.VoiceChannel):
         temporary_connection = False
 
         if vc and vc.is_connected():
-            if vc.is_playing():
-                for _ in range(30):
-                    if not vc.is_playing():
-                        break
-                    await asyncio.sleep(0.2)
+            await wait_until_tts_idle(vc, session)
 
             if vc.channel != channel:
                 await vc.move_to(channel)

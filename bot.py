@@ -82,6 +82,7 @@ GAMBLE_WIN_RATE = 0.45
 KST = timezone(timedelta(hours=9))
 gamble_lock = asyncio.Lock()
 DONATION_QR_FILE = "donation_qr.jpg"
+TTS_SETTINGS_FILE = "tts_settings.json"
 
 GAMBLE_WIN_MESSAGES = [
     "🎰 잭팟은 아니지만 손맛은 확실합니다!",
@@ -150,6 +151,56 @@ def save_gamble_data(data: dict):
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print("도박 데이터 저장 실패:", e)
+
+
+def load_tts_settings() -> dict:
+    if not os.path.exists(TTS_SETTINGS_FILE):
+        return {"users": {}}
+
+    try:
+        with open(TTS_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print("TTS 설정 로드 실패:", e)
+        return {"users": {}}
+
+    if not isinstance(data, dict):
+        return {"users": {}}
+
+    data.setdefault("users", {})
+    return data
+
+
+def save_tts_settings(data: dict):
+    try:
+        with open(TTS_SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("TTS 설정 저장 실패:", e)
+
+
+def get_saved_tts_setting(user_id: int) -> dict:
+    data = load_tts_settings()
+    setting = data.setdefault("users", {}).get(str(user_id), {})
+
+    rate = setting.get("rate", "+0%")
+    if not re.fullmatch(r'[+-]\d+%', rate):
+        rate = "+0%"
+
+    return {
+        "rate": rate
+    }
+
+
+def save_tts_rate(user_id: int, rate: str):
+    data = load_tts_settings()
+    users = data.setdefault("users", {})
+    setting = users.setdefault(str(user_id), {})
+
+    setting.pop("voice", None)
+    setting["rate"] = rate
+
+    save_tts_settings(data)
 
 
 def get_gamble_account(data: dict, user_id: int) -> dict:
@@ -1116,10 +1167,12 @@ async def tts_register(
     )
 
     voice_name = VOICE_OPTIONS[목소리]
+    saved_setting = get_saved_tts_setting(interaction.user.id)
+    saved_rate = saved_setting["rate"]
     already_registered = interaction.user.id in session["users"]
 
     session["users"][interaction.user.id] = voice_name
-    session.setdefault("rates", {}).setdefault(interaction.user.id, "+0%")
+    session.setdefault("rates", {})[interaction.user.id] = saved_rate
 
     if already_registered:
         await interaction.response.send_message(
@@ -1152,6 +1205,7 @@ async def tts_rate(interaction: discord.Interaction, 속도: int):
 
     rate = f"{속도:+d}%"
     session.setdefault("rates", {})[interaction.user.id] = rate
+    save_tts_rate(interaction.user.id, rate)
 
     await interaction.response.send_message(
         f"🎚️ TTS 읽는 속도를 `{rate}`로 설정했습니다.",

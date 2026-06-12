@@ -567,14 +567,16 @@ def clean_tts_text(text: str) -> str:
 async def generate_tts(
     text: str,
     filename: str,
-    voice_name: str
+    voice_name: str,
+    rate: str = "+0%"
 ):
     if voice_name not in VOICE_NAMES:
         voice_name = DEFAULT_TTS_VOICE
 
     communicate = edge_tts.Communicate(
         text=text,
-        voice=voice_name
+        voice=voice_name,
+        rate=rate
     )
 
     try:
@@ -585,7 +587,8 @@ async def generate_tts(
 
         communicate = edge_tts.Communicate(
             text=text,
-            voice=DEFAULT_TTS_VOICE
+            voice=DEFAULT_TTS_VOICE,
+            rate=rate
         )
         await communicate.save(filename)
 
@@ -603,7 +606,11 @@ async def tts_worker(guild_id: int):
             if item is None:
                 break
 
-            text, voice_name = item
+            if len(item) == 2:
+                text, voice_name = item
+                rate = "+0%"
+            else:
+                text, voice_name, rate = item
 
             vc = session["vc"]
             filename = None
@@ -614,7 +621,8 @@ async def tts_worker(guild_id: int):
                 await generate_tts(
                     text,
                     filename,
-                    voice_name
+                    voice_name,
+                    rate
                 )
 
                 audio = discord.FFmpegPCMAudio(filename)
@@ -890,6 +898,8 @@ class RabbitBotHelpView(discord.ui.View):
             "3. 채팅을 입력하면 봇이 읽어줍니다\n"
             "4. 종료할 때는 `/토끼tts퇴장`\n\n"
             "목소리: 여자1 / 남자1 / 남자2\n"
+            "속도 설정: `/토끼tts속도 값`\n"
+            "예: `/토끼tts속도 10`, `/토끼tts속도 -10`, `/토끼tts속도 0`\n"
             "상태 확인: `/토끼tts상태`\n"
             "운영자 종료: `/토끼tts강제종료`",
             ephemeral=True
@@ -1058,6 +1068,7 @@ async def ensure_tts_session(guild: discord.Guild, channel: discord.VoiceChannel
             "vc": vc,
             "channel_id": channel.id,
             "users": {},
+            "rates": {},
             "queue": asyncio.Queue(),
             "task": asyncio.create_task(
                 tts_worker(guild.id)
@@ -1107,6 +1118,7 @@ async def tts_register(
     already_registered = interaction.user.id in session["users"]
 
     session["users"][interaction.user.id] = voice_name
+    session.setdefault("rates", {}).setdefault(interaction.user.id, "+0%")
 
     if already_registered:
         await interaction.response.send_message(
@@ -1117,6 +1129,34 @@ async def tts_register(
         await interaction.response.send_message(
             f"🎤 등록 완료: {VOICE_NAMES[voice_name]}"
         )
+
+
+@bot.tree.command(name="토끼tts속도", guild=GUILD_OBJ)
+async def tts_rate(interaction: discord.Interaction, 속도: int):
+
+    if 속도 < -30 or 속도 > 30:
+        return await interaction.response.send_message(
+            "❌ 속도는 -30부터 30까지만 설정할 수 있습니다.\n"
+            "예: `/토끼tts속도 10`, `/토끼tts속도 -10`, `/토끼tts속도 0`",
+            ephemeral=True
+        )
+
+    session = tts_sessions.get(interaction.guild.id)
+
+    if not session or interaction.user.id not in session["users"]:
+        return await interaction.response.send_message(
+            "❌ 먼저 `/토끼tts등록 목소리`로 TTS에 등록해주세요.",
+            ephemeral=True
+        )
+
+    rate = f"{속도:+d}%"
+    session.setdefault("rates", {})[interaction.user.id] = rate
+
+    await interaction.response.send_message(
+        f"🎚️ TTS 읽는 속도를 `{rate}`로 설정했습니다.",
+        ephemeral=True
+    )
+
 
 @bot.tree.command(name="토끼tts퇴장", guild=GUILD_OBJ)
 async def tts_leave(interaction: discord.Interaction):
@@ -1142,6 +1182,7 @@ async def tts_leave(interaction: discord.Interaction):
 
     # 유저 제거
     session["users"].pop(user_id, None)
+    session.setdefault("rates", {}).pop(user_id, None)
 
     remaining = len(session["users"])
 
@@ -1188,6 +1229,7 @@ async def tts_status(interaction: discord.Interaction):
     vc = session.get("vc")
     channel = vc.channel if vc and vc.channel else None
     users = session.get("users", {})
+    rates = session.setdefault("rates", {})
     queue = session.get("queue")
 
     msg = "🎧 **토끼 TTS 상태**\n\n"
@@ -1200,7 +1242,10 @@ async def tts_status(interaction: discord.Interaction):
         for user_id, voice_name in users.items():
             member = interaction.guild.get_member(user_id)
             name = member.mention if member else f"`{user_id}`"
-            msg += f"• {name}: {VOICE_NAMES.get(voice_name, voice_name)}\n"
+            msg += (
+                f"• {name}: {VOICE_NAMES.get(voice_name, voice_name)} "
+                f"/ 속도 {rates.get(user_id, '+0%')}\n"
+            )
     else:
         msg += "\n등록된 사용자가 없습니다.\n"
 
@@ -1755,8 +1800,9 @@ async def on_message(message):
         return
 
     voice_name = session["users"][message.author.id]
+    rate = session.setdefault("rates", {}).get(message.author.id, "+0%")
 
-    await session["queue"].put((text, voice_name))
+    await session["queue"].put((text, voice_name, rate))
 
     try:
         await message.delete()
@@ -1787,6 +1833,7 @@ async def on_voice_state_update(member, before, after):
     if before.channel == vc.channel and after.channel != vc.channel:
 
         session["users"].pop(member.id, None)
+        session.setdefault("rates", {}).pop(member.id, None)
 
         print(
             f"[TTS] 자동 등록 해제: "

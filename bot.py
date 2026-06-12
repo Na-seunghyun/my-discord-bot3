@@ -2031,7 +2031,7 @@ async def on_message(message):
 
     if message.author.voice and message.author.voice.channel:
         is_voice_channel = (
-            message.author.voice.channel.id == vc.channel.id
+            message.author.voice.channel.id == session.get("channel_id")
         )
 
     if not (is_text_channel or is_voice_channel):
@@ -2077,9 +2077,14 @@ async def on_voice_state_update(member, before, after):
     if member.id not in session["users"]:
         return
 
-    # 토끼봇이 있는 채널을 떠난 경우
-    # (다른 채널 이동 / 연결 끊김 모두 포함)
-    if before.channel == vc.channel and after.channel != vc.channel:
+    session_channel_id = session.get("channel_id")
+
+    before_channel_id = before.channel.id if before.channel else None
+    after_channel_id = after.channel.id if after.channel else None
+
+    # TTS 세션 채널을 떠난 경우
+    # 방송 안내로 봇이 잠시 다른 채널에 있어도 원래 세션 채널 기준으로 감지
+    if before_channel_id == session_channel_id and after_channel_id != session_channel_id:
 
         session["users"].pop(member.id, None)
         session.setdefault("rates", {}).pop(member.id, None)

@@ -899,7 +899,8 @@ class RabbitBotHelpView(discord.ui.View):
             "4. 종료할 때는 `/토끼tts퇴장`\n\n"
             "목소리: 여자1 / 남자1 / 남자2\n"
             "속도 설정: `/토끼tts속도 값`\n"
-            "예: `/토끼tts속도 10`, `/토끼tts속도 -10`, `/토끼tts속도 0`\n"
+            "범위: -50 ~ 50\n"
+            "예: `/토끼tts속도 30`, `/토끼tts속도 -20`, `/토끼tts속도 0`\n"
             "상태 확인: `/토끼tts상태`\n"
             "운영자 종료: `/토끼tts강제종료`",
             ephemeral=True
@@ -1134,9 +1135,9 @@ async def tts_register(
 @bot.tree.command(name="토끼tts속도", guild=GUILD_OBJ)
 async def tts_rate(interaction: discord.Interaction, 속도: int):
 
-    if 속도 < -30 or 속도 > 30:
+    if 속도 < -50 or 속도 > 50:
         return await interaction.response.send_message(
-            "❌ 속도는 -30부터 30까지만 설정할 수 있습니다.\n"
+            "❌ 속도는 -50부터 50까지만 설정할 수 있습니다.\n"
             "예: `/토끼tts속도 10`, `/토끼tts속도 -10`, `/토끼tts속도 0`",
             ephemeral=True
         )

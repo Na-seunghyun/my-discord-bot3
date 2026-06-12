@@ -2354,10 +2354,7 @@ async def on_message(message):
         f"{assigned_bot_name} / 채널 {session.get('channel_id')} / {text[:40]}"
     )
 
-    try:
-        await message.delete()
-    except:
-        pass
+    # TTS 채팅은 누가 말했는지 확인할 수 있도록 삭제하지 않습니다.
 
 
 # ======================================================
@@ -2418,6 +2415,39 @@ async def on_ready():
 # ======================================================
 # 🚀 실행
 # ======================================================
+async def disconnect_all_voice_clients():
+    clients = [bot, *helper_bots]
+
+    for client in clients:
+        for vc in list(client.voice_clients):
+            try:
+                if vc.is_connected():
+                    await vc.disconnect(force=True)
+            except Exception as e:
+                print("음성 연결 종료 실패:", e)
+
+
+async def close_all_clients():
+    await disconnect_all_voice_clients()
+
+    for session_group in list(tts_sessions.values()):
+        for session in list(session_group.values()):
+            try:
+                session["queue"].put_nowait(None)
+            except Exception:
+                pass
+
+    tts_sessions.clear()
+
+    clients = [bot, *helper_bots]
+    for client in clients:
+        try:
+            if not client.is_closed():
+                await client.close()
+        except Exception as e:
+            print("봇 연결 종료 실패:", e)
+
+
 async def start_bots():
     if not TOKEN:
         raise RuntimeError("DISCORD_TOKEN이 .env에 설정되어 있지 않습니다.")
@@ -2436,7 +2466,17 @@ async def start_bots():
     else:
         print("보조봇 토큰이 없어 메인 봇만 실행합니다.")
 
-    await asyncio.gather(*tasks)
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        print("봇 종료 처리 중: 음성 연결을 정리합니다.")
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await close_all_clients()
 
 
-asyncio.run(start_bots())
+try:
+    asyncio.run(start_bots())
+except KeyboardInterrupt:
+    print("봇을 종료했습니다.")

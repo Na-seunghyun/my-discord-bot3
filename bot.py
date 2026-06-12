@@ -37,6 +37,10 @@ ALLOWED_ROLES = {
 # 📢 공지 상태
 # ======================================================
 announcement_running = False
+stream_check_enabled = False
+stream_check_task = None
+stream_alert_running = False
+stream_alert_cooldowns = {}
 
 # ======================================================
 # 🔊 토끼봇 TTS
@@ -74,6 +78,19 @@ VOICE_CHANNEL_IDS = [
     1483413953844482168,
     1483414016314314888
 ]
+
+STREAM_CHECK_EXCLUDED_CHANNEL_IDS = {
+    1483416883750375605,
+    1484518364108951562,
+    1339193502994665532
+}
+
+STREAM_CHECK_MIN_MEMBERS = 1
+STREAM_CHECK_INTERVAL_SECONDS = 60
+STREAM_CHECK_COOLDOWN_SECONDS = 600
+STREAM_ALERT_TEXT = "방송이 켜져 있지 않습니다. 게임 중이라면 한 분은 화면공유를 켜주세요."
+STREAM_ALERT_VOICE = "ko-KR-SunHiNeural"
+STREAM_ALERT_RATE = "+50%"
 
 GAMBLE_DATA_FILE = "gamble_data.json"
 GAMBLE_DAILY_ALLOWANCE = 500
@@ -731,6 +748,130 @@ async def play_announcement(vc, text):
             pass
 
 
+async def play_stream_alert(vc):
+
+    filename = f"stream_alert_{uuid.uuid4().hex}.mp3"
+
+    try:
+        await generate_tts(
+            STREAM_ALERT_TEXT,
+            filename,
+            STREAM_ALERT_VOICE,
+            STREAM_ALERT_RATE
+        )
+
+        vc.play(
+            discord.FFmpegPCMAudio(filename)
+        )
+
+        while vc.is_playing():
+            await asyncio.sleep(0.2)
+
+    except Exception as e:
+        print("방송 안내 재생 오류:", e)
+        traceback.print_exc()
+
+    finally:
+        try:
+            os.remove(filename)
+        except:
+            pass
+
+
+def should_send_stream_alert(channel: discord.VoiceChannel) -> bool:
+    if channel.id in STREAM_CHECK_EXCLUDED_CHANNEL_IDS:
+        return False
+
+    humans = [m for m in channel.members if not m.bot]
+
+    if len(humans) < STREAM_CHECK_MIN_MEMBERS:
+        return False
+
+    if any(getattr(m.voice, "self_stream", False) for m in humans if m.voice):
+        return False
+
+    now = datetime.now(timezone.utc).timestamp()
+    last_alert = stream_alert_cooldowns.get(channel.id, 0)
+
+    if now - last_alert < STREAM_CHECK_COOLDOWN_SECONDS:
+        return False
+
+    return True
+
+
+async def send_stream_alert(channel: discord.VoiceChannel):
+    global stream_alert_running
+
+    if stream_alert_running or announcement_running:
+        return
+
+    stream_alert_running = True
+
+    try:
+        guild = channel.guild
+        session = tts_sessions.get(guild.id)
+        vc = session.get("vc") if session else None
+        original_channel = vc.channel if vc and vc.is_connected() else None
+        temporary_connection = False
+
+        if vc and vc.is_connected():
+            if vc.is_playing():
+                for _ in range(30):
+                    if not vc.is_playing():
+                        break
+                    await asyncio.sleep(0.2)
+
+            if vc.channel != channel:
+                await vc.move_to(channel)
+        else:
+            vc = await channel.connect()
+            temporary_connection = True
+
+            try:
+                await guild.change_voice_state(
+                    channel=channel,
+                    self_deaf=True
+                )
+            except Exception as e:
+                print("방송 안내 Self Deaf 설정 실패:", e)
+
+        await play_stream_alert(vc)
+        stream_alert_cooldowns[channel.id] = datetime.now(timezone.utc).timestamp()
+
+        if temporary_connection:
+            await vc.disconnect()
+        elif original_channel and vc.is_connected() and original_channel != channel:
+            await vc.move_to(original_channel)
+
+    except Exception as e:
+        print("방송 안내 처리 오류:", e)
+        traceback.print_exc()
+
+    finally:
+        stream_alert_running = False
+
+
+async def stream_check_loop():
+    await bot.wait_until_ready()
+
+    while not bot.is_closed():
+        try:
+            if stream_check_enabled and not announcement_running:
+                guild = bot.get_guild(GUILD_ID)
+
+                if guild:
+                    for channel in guild.voice_channels:
+                        if should_send_stream_alert(channel):
+                            await send_stream_alert(channel)
+                            break
+
+        except Exception as e:
+            print("방송 체크 루프 오류:", e)
+            traceback.print_exc()
+
+        await asyncio.sleep(STREAM_CHECK_INTERVAL_SECONDS)
+
+
 # ======================================================
 # 📢 기존 TTS 강제 종료
 # ======================================================
@@ -936,6 +1077,7 @@ class RabbitBotHelpView(discord.ui.View):
             "🎲 도박: 매일 지급되는 가상 금액으로 가볍게 즐깁니다.\n"
             "🔮 사주/운세: 생년월일과 시간으로 재미용 운세를 봅니다.\n"
             "🎮 팀짜기/소환: 음성채널 인원을 나누거나 이동시킵니다.\n"
+            "📡 방송 체크: 화면공유가 꺼진 게임방에 안내 방송을 보냅니다.\n"
             "📋 검사/공지: 운영자를 위한 관리 기능입니다.",
             ephemeral=True
         )
@@ -1350,6 +1492,58 @@ async def tts_force_stop(interaction: discord.Interaction):
 
     await interaction.response.send_message(
         "🛑 TTS 세션을 강제 종료했습니다."
+    )
+
+
+@bot.tree.command(name="방송체크켜기", guild=GUILD_OBJ)
+async def stream_check_on(interaction: discord.Interaction):
+    global stream_check_enabled
+
+    if not await check_permission(interaction):
+        return await interaction.response.send_message(
+            "❌ 권한 없음",
+            ephemeral=True
+        )
+
+    stream_check_enabled = True
+
+    await interaction.response.send_message(
+        "📡 방송 체크를 켰습니다.\n"
+        f"👥 {STREAM_CHECK_MIN_MEMBERS}명 이상, 화면공유가 없는 음성채널에 안내합니다.\n"
+        f"⏱️ 같은 채널은 {STREAM_CHECK_COOLDOWN_SECONDS // 60}분에 한 번만 안내합니다."
+    )
+
+
+@bot.tree.command(name="방송체크끄기", guild=GUILD_OBJ)
+async def stream_check_off(interaction: discord.Interaction):
+    global stream_check_enabled
+
+    if not await check_permission(interaction):
+        return await interaction.response.send_message(
+            "❌ 권한 없음",
+            ephemeral=True
+        )
+
+    stream_check_enabled = False
+
+    await interaction.response.send_message(
+        "📴 방송 체크를 껐습니다."
+    )
+
+
+@bot.tree.command(name="방송체크상태", guild=GUILD_OBJ)
+async def stream_check_status(interaction: discord.Interaction):
+
+    excluded = ", ".join(str(cid) for cid in STREAM_CHECK_EXCLUDED_CHANNEL_IDS)
+
+    await interaction.response.send_message(
+        "📡 **방송 체크 상태**\n\n"
+        f"상태: {'켜짐' if stream_check_enabled else '꺼짐'}\n"
+        f"최소 인원: {STREAM_CHECK_MIN_MEMBERS}명\n"
+        f"체크 주기: {STREAM_CHECK_INTERVAL_SECONDS}초\n"
+        f"채널 쿨타임: {STREAM_CHECK_COOLDOWN_SECONDS // 60}분\n"
+        f"제외 채널: `{excluded}`",
+        ephemeral=True
     )
     
 @bot.tree.command(
@@ -1933,6 +2127,7 @@ async def on_voice_state_update(member, before, after):
 # ======================================================
 @bot.event
 async def on_ready():
+    global stream_check_task
 
     print(f"Logged in as {bot.user}")
 
@@ -1941,6 +2136,9 @@ async def on_ready():
         print("Synced")
     except Exception as e:
         print(f"Sync error: {e}")
+
+    if stream_check_task is None or stream_check_task.done():
+        stream_check_task = asyncio.create_task(stream_check_loop())
 
 # ======================================================
 # 🚀 실행

@@ -72,6 +72,7 @@ ALLOWED_ROLES = {
 # ======================================================
 announcement_running = False
 stream_check_enabled = False
+stream_check_manual_override = None
 stream_check_task = None
 stream_alert_running = False
 stream_alert_cooldowns = {}
@@ -119,9 +120,11 @@ STREAM_CHECK_EXCLUDED_CHANNEL_IDS = {
     1339193502994665532
 }
 
-STREAM_CHECK_MIN_MEMBERS = 1
+STREAM_CHECK_MIN_MEMBERS = 2
 STREAM_CHECK_INTERVAL_SECONDS = 60
 STREAM_CHECK_COOLDOWN_SECONDS = 600
+STREAM_CHECK_AUTO_START_HOUR = 12
+STREAM_CHECK_AUTO_END_HOUR = 20
 STREAM_ALERT_TEXT = "방송이 켜져 있지 않습니다. 게임 중이라면 한 분은 화면공유를 켜주세요."
 STREAM_ALERT_VOICE = "ko-KR-SunHiNeural"
 STREAM_ALERT_RATE = "+50%"
@@ -1038,6 +1041,28 @@ def should_send_stream_alert(channel: discord.VoiceChannel) -> bool:
     return True
 
 
+def is_stream_check_auto_time() -> bool:
+    now = datetime.now(KST)
+    return STREAM_CHECK_AUTO_START_HOUR <= now.hour < STREAM_CHECK_AUTO_END_HOUR
+
+
+def is_stream_check_active() -> bool:
+    if stream_check_manual_override is not None:
+        return stream_check_manual_override
+
+    return is_stream_check_auto_time()
+
+
+def get_stream_check_mode_text() -> str:
+    if stream_check_manual_override is True:
+        return "수동 켜짐"
+
+    if stream_check_manual_override is False:
+        return "수동 꺼짐"
+
+    return "자동"
+
+
 async def send_stream_alert(channel: discord.VoiceChannel):
     global stream_alert_running
 
@@ -1096,11 +1121,15 @@ async def send_stream_alert(channel: discord.VoiceChannel):
 
 
 async def stream_check_loop():
+    global stream_check_enabled
+
     await bot.wait_until_ready()
 
     while not bot.is_closed():
         try:
-            if stream_check_enabled and not announcement_running:
+            stream_check_enabled = is_stream_check_active()
+
+            if is_stream_check_active() and not announcement_running:
                 guild = bot.get_guild(GUILD_ID)
 
                 if guild:
@@ -1329,8 +1358,11 @@ class RabbitBotHelpView(discord.ui.View):
             "`/공지 내용` - 사람이 있는 음성방에 공지를 방송합니다.\n"
             "기존 TTS는 강제 종료하지 않고, 비어 있는 보조봇이 우선 공지합니다.\n"
             "모든 봇이 사용 중이면 메인봇이 하던 말을 끝낸 뒤 공지를 처리합니다.\n\n"
-            "`/방송체크켜기` - 화면공유가 꺼진 음성방을 감지해 안내합니다.\n"
-            "`/방송체크끄기` - 방송 체크를 끕니다.\n"
+            "방송체크는 한국시간 12:00 ~ 20:00에 자동으로 켜지고, 그 외 시간에는 자동으로 꺼집니다.\n"
+            "최소 2명 이상 있는 음성방에서 화면공유가 없을 때 안내합니다.\n\n"
+            "`/방송체크켜기` - 방송 체크를 수동으로 켭니다.\n"
+            "`/방송체크끄기` - 방송 체크를 수동으로 끕니다.\n"
+            "`/방송체크자동` - 자동 시간표로 되돌립니다.\n"
             "`/방송체크상태` - 현재 방송 체크 설정을 확인합니다.",
             ephemeral=True
         )
@@ -1831,7 +1863,7 @@ async def tts_force_stop(interaction: discord.Interaction):
 
 @bot.tree.command(name="방송체크켜기", guild=GUILD_OBJ)
 async def stream_check_on(interaction: discord.Interaction):
-    global stream_check_enabled
+    global stream_check_enabled, stream_check_manual_override
 
     if not await check_permission(interaction):
         return await interaction.response.send_message(
@@ -1840,17 +1872,19 @@ async def stream_check_on(interaction: discord.Interaction):
         )
 
     stream_check_enabled = True
+    stream_check_manual_override = True
 
     await interaction.response.send_message(
-        "📡 방송 체크를 켰습니다.\n"
+        "📡 방송 체크를 수동으로 켰습니다.\n"
         f"👥 {STREAM_CHECK_MIN_MEMBERS}명 이상, 화면공유가 없는 음성채널에 안내합니다.\n"
-        f"⏱️ 같은 채널은 {STREAM_CHECK_COOLDOWN_SECONDS // 60}분에 한 번만 안내합니다."
+        f"⏱️ 같은 채널은 {STREAM_CHECK_COOLDOWN_SECONDS // 60}분에 한 번만 안내합니다.\n"
+        "자동 시간표로 되돌리려면 `/방송체크자동`을 사용해주세요."
     )
 
 
 @bot.tree.command(name="방송체크끄기", guild=GUILD_OBJ)
 async def stream_check_off(interaction: discord.Interaction):
-    global stream_check_enabled
+    global stream_check_enabled, stream_check_manual_override
 
     if not await check_permission(interaction):
         return await interaction.response.send_message(
@@ -1859,9 +1893,31 @@ async def stream_check_off(interaction: discord.Interaction):
         )
 
     stream_check_enabled = False
+    stream_check_manual_override = False
 
     await interaction.response.send_message(
-        "📴 방송 체크를 껐습니다."
+        "📴 방송 체크를 수동으로 껐습니다.\n"
+        "자동 시간표로 되돌리려면 `/방송체크자동`을 사용해주세요."
+    )
+
+
+@bot.tree.command(name="방송체크자동", guild=GUILD_OBJ)
+async def stream_check_auto(interaction: discord.Interaction):
+    global stream_check_enabled, stream_check_manual_override
+
+    if not await check_permission(interaction):
+        return await interaction.response.send_message(
+            "❌ 권한 없음",
+            ephemeral=True
+        )
+
+    stream_check_manual_override = None
+    stream_check_enabled = is_stream_check_active()
+
+    await interaction.response.send_message(
+        "🕛 방송 체크를 자동 시간표로 변경했습니다.\n"
+        "자동 켜짐: 한국시간 12:00 ~ 20:00\n"
+        "자동 꺼짐: 그 외 시간"
     )
 
 
@@ -1869,17 +1925,24 @@ async def stream_check_off(interaction: discord.Interaction):
 async def stream_check_status(interaction: discord.Interaction):
 
     excluded = ", ".join(str(cid) for cid in STREAM_CHECK_EXCLUDED_CHANNEL_IDS)
+    auto_active = is_stream_check_auto_time()
+    active = is_stream_check_active()
+    now_text = datetime.now(KST).strftime("%H:%M")
 
     await interaction.response.send_message(
         "📡 **방송 체크 상태**\n\n"
-        f"상태: {'켜짐' if stream_check_enabled else '꺼짐'}\n"
+        f"현재 상태: {'켜짐' if active else '꺼짐'}\n"
+        f"모드: {get_stream_check_mode_text()}\n"
+        f"현재 한국시간: {now_text}\n"
+        f"자동 시간표: 12:00 ~ 20:00 ({'켜지는 시간' if auto_active else '꺼지는 시간'})\n"
         f"최소 인원: {STREAM_CHECK_MIN_MEMBERS}명\n"
         f"체크 주기: {STREAM_CHECK_INTERVAL_SECONDS}초\n"
         f"채널 쿨타임: {STREAM_CHECK_COOLDOWN_SECONDS // 60}분\n"
         f"제외 채널: `{excluded}`",
         ephemeral=True
     )
-    
+
+
 @bot.tree.command(
     name="공지",
     description="전체 음성채널 공지",
